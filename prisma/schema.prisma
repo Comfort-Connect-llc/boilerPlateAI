@@ -1,0 +1,48 @@
+// Prisma schema for PostgreSQL read replica
+// Used for complex queries, pagination, search, and reporting
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================
+// ADD YOUR MODELS BELOW
+// =============================================
+//
+// When creating a new service, define your domain models here.
+// Follow these patterns for consistency:
+//
+// 1. Use UUID for primary keys
+// 2. Include version, active, createdAt, updatedAt fields
+// 3. Store auditTrail as Json[] for change history
+// 4. Use snake_case for database column names with @map
+// 5. Use camelCase for Prisma field names
+//
+// Example model pattern:
+//
+// model YourEntity {
+//   id         String   @id @default(uuid()) @db.Uuid
+//   name       String
+//   email      String   @unique
+//   status     String   // Consider using enums for status fields
+//   metadata   Json?    // Flexible JSON storage for additional data
+//   version    Int      @default(1)
+//   active     Boolean  @default(true)
+//   createdAt  DateTime @default(now()) @map("created_at")
+//   updatedAt  DateTime @updatedAt @map("updated_at")
+//   auditTrail Json[]   @default([]) @map("audit_trail")
+//
+//   // Add relations as needed
+//   // relatedItems RelatedItem[]
+//
+//   @@index([status])  // Add indexes for frequently queried fields
+//   @@map("your_entities")
+// }
+//
+// For more examples, see src/modules/_example-entity/README.md
+// =============================================
