@@ -1,4 +1,4 @@
-import { SSMClient, GetParametersByPathCommand, Parameter } from '@aws-sdk/client-ssm'
+import { SSMClient, GetParametersByPathCommand, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { logger } from '../lib/logger.js'
 
 export interface SSMLoaderOptions {
@@ -8,39 +8,49 @@ export interface SSMLoaderOptions {
   customPaths?: string[]
 }
 
+export interface SSMLoadResult {
+  config: Record<string, string>
+  flagNames: string[]
+  flagPaths: Map<string, string>
+}
+
 /**
  * Load configuration from AWS SSM Parameter Store.
  *
  * Loading order (last wins):
- * 1. Shared path: /shared/{environment}/
- * 2. Service-specific path: /{serviceName}/{environment}/
+ * 1. Shared path: /shared/
+ * 2. Service-specific path: /{serviceName}/
  * 3. Custom paths (in order provided)
  *
+ * After loading from /{serviceName}/, identifies parameters under /{serviceName}/flags/
+ * as dynamic flags that should be fetched on-demand.
+ *
  * Example SSM structure:
- *   /myservice/production/
+ *   /myservice/
  *     - DB_HOST
  *     - STRIPE_SECRET_KEY
- *   /shared/production/
+ *   /myservice/flags/
+ *     - FEATURE_X_ENABLED
+ *     - FEATURE_Y_ENABLED
+ *   /shared/
  *     - AWS_REGION
  *     - LOG_LEVEL
  *
  * @param options - Configuration options
- * @returns Object with environment variables from SSM
+ * @returns Object with config and list of flag parameter names
  */
 export async function loadFromSSM(
   options: SSMLoaderOptions = {}
-): Promise<Record<string, string>> {
+): Promise<SSMLoadResult> {
   const {
-    serviceName = process.env.SERVICE_NAME || 'boilerplate',
-    environment = process.env.NODE_ENV || 'development',
-    region = process.env.AWS_REGION || 'us-east-1',
+    serviceName = 'boilerplate',
+    region = 'us-east-1',
     customPaths = [],
   } = options
 
   logger.info(
     {
       serviceName,
-      environment,
       region,
       customPaths,
     },
@@ -49,14 +59,21 @@ export async function loadFromSSM(
 
   const client = new SSMClient({ region })
   const config: Record<string, string> = {}
+  const flagNames: string[] = []
+  const flagPaths = new Map<string, string>()
 
   // Build paths in order (first = lowest priority)
-  const paths = [`/shared/${environment}/`, `/${serviceName}/${environment}/`, ...customPaths]
+  const paths = [`/shared/`, `/${serviceName}/`, ...customPaths]
+  const flagsPath = `/${serviceName}/flags/`
 
   // Load from each path (later paths override earlier)
   for (const path of paths) {
     try {
-      const params = await loadParametersFromPath(client, path)
+      const params = await loadParametersFromPath(
+        client,
+        path,
+        path === `/${serviceName}/` ? flagsPath : undefined
+      )
       Object.assign(config, params)
 
       logger.info(
@@ -67,7 +84,7 @@ export async function loadFromSSM(
         'Loaded parameters from SSM path'
       )
     } catch (error) {
-      // Path might not exist (e.g., /shared/local/), that's OK
+      // Path might not exist, that's OK
       logger.warn(
         {
           path,
@@ -78,24 +95,98 @@ export async function loadFromSSM(
     }
   }
 
+  // After loading from /serviceName/, check for flags under /serviceName/flags/
+  try {
+    const flagParams = await loadParametersFromPathWithFullPaths(client, flagsPath)
+    
+    for (const fullPath of Object.keys(flagParams)) {
+      const flagName = extractKeyFromPath(fullPath, flagsPath)
+      flagNames.push(flagName)
+      flagPaths.set(flagName, fullPath)
+    }
+
+    if (flagNames.length > 0) {
+      logger.info(
+        {
+          flagsPath,
+          flagCount: flagNames.length,
+          flagNames,
+        },
+        'Identified dynamic flag parameters'
+      )
+    }
+  } catch (error) {
+    // Flags path might not exist, that's OK
+    logger.debug(
+      {
+        flagsPath,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      },
+      'No flags path found (this is OK)'
+    )
+  }
+
   logger.info(
     {
       totalParameters: Object.keys(config).length,
+      flagCount: flagNames.length,
     },
     'Completed loading from SSM Parameter Store'
   )
 
-  return config
+  return { config, flagNames, flagPaths }
 }
 
 /**
  * Load all parameters from a specific SSM path.
  *
  * @param client - SSM client
- * @param path - Parameter path (e.g., /myservice/production/)
+ * @param path - Parameter path (e.g., /myservice/)
  * @returns Object with parameter names and values
  */
 async function loadParametersFromPath(
+  client: SSMClient,
+  path: string,
+  excludePathPrefix?: string
+): Promise<Record<string, string>> {
+  const parameters: Record<string, string> = {}
+  let nextToken: string | undefined
+
+  do {
+    const command = new GetParametersByPathCommand({
+      Path: path,
+      Recursive: true,
+      WithDecryption: true,
+      NextToken: nextToken,
+    })
+
+    const response = await client.send(command)
+
+    if (response.Parameters) {
+      for (const param of response.Parameters) {
+        if (excludePathPrefix && param.Name && param.Name.startsWith(excludePathPrefix)) {
+          continue
+        }
+        const key = extractKeyFromPath(param.Name!, path)
+        parameters[key] = param.Value!
+      }
+    }
+
+    nextToken = response.NextToken
+  } while (nextToken)
+
+  return parameters
+}
+
+/**
+ * Load all parameters from a specific SSM path, returning full paths as keys.
+ * Used to identify flag parameters without loading their values.
+ *
+ * @param client - SSM client
+ * @param path - Parameter path (e.g., /myservice/flags/)
+ * @returns Object with full paths as keys and values
+ */
+async function loadParametersFromPathWithFullPaths(
   client: SSMClient,
   path: string
 ): Promise<Record<string, string>> {
@@ -106,17 +197,17 @@ async function loadParametersFromPath(
     const command = new GetParametersByPathCommand({
       Path: path,
       Recursive: true,
-      WithDecryption: true, // Decrypt SecureString parameters
+      WithDecryption: true,
       NextToken: nextToken,
     })
 
     const response = await client.send(command)
 
-    // Process parameters
     if (response.Parameters) {
       for (const param of response.Parameters) {
-        const key = extractKeyFromPath(param.Name!, path)
-        parameters[key] = param.Value!
+        if (param.Name && param.Value) {
+          parameters[param.Name] = param.Value
+        }
       }
     }
 
@@ -130,8 +221,8 @@ async function loadParametersFromPath(
  * Extract parameter key from full SSM path.
  *
  * Examples:
- *   /myservice/production/DB_HOST -> DB_HOST
- *   /shared/production/LOG_LEVEL -> LOG_LEVEL
+ *   /myservice/DB_HOST -> DB_HOST
+ *   /shared/LOG_LEVEL -> LOG_LEVEL
  *   /custom/path/to/API_KEY -> API_KEY
  *
  * @param fullPath - Full parameter path
@@ -146,6 +237,41 @@ function extractKeyFromPath(fullPath: string, basePath: string): string {
   // For nested paths, join with underscores and uppercase
   // Example: db/host -> DB_HOST
   return segments.join('_').toUpperCase()
+}
+
+/**
+ * Get a single parameter from SSM Parameter Store.
+ *
+ * @param parameterName - Full SSM parameter path (e.g., /myservice/flags/FEATURE_X_ENABLED)
+ * @param region - AWS region (defaults to us-east-1)
+ * @returns Parameter value, or undefined if not found
+ */
+export async function getSSMParam(
+  parameterName: string,
+  region?: string
+): Promise<string | undefined> {
+  const client = new SSMClient({ 
+    region: region || process.env.AWS_REGION || 'us-east-1' 
+  })
+
+  try {
+    const command = new GetParameterCommand({
+      Name: parameterName,
+      WithDecryption: true,
+    })
+
+    const response = await client.send(command)
+    return response.Parameter?.Value
+  } catch (error) {
+    logger.warn(
+      {
+        parameterName,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      },
+      'Failed to fetch SSM parameter'
+    )
+    return undefined
+  }
 }
 
 /**

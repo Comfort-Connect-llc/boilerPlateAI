@@ -73,7 +73,7 @@ class M2MClient {
         throw new Error(`Failed to refresh token: ${response.status} ${errorText}`)
       }
 
-      const data: TokenResponse = await response.json()
+      const data = (await response.json()) as TokenResponse
 
       this.token = data.access_token
       // Refresh 5 minutes before expiry

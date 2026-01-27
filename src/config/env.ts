@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { loadFromSSM, shouldUseSSM } from './ssmLoader.js'
+import { config as dotenvConfig } from 'dotenv'
+import { loadFromSSM, shouldUseSSM, getSSMParam } from './ssmLoader.js'
 import { logger } from '../lib/logger.js'
 
 /**
@@ -68,6 +69,9 @@ const envSchema = z.object({
 export type Env = z.infer<typeof envSchema>
 
 let cachedEnv: Env | null = null
+let flagNames: Set<string> = new Set()
+let flagPaths: Map<string, string> = new Map()
+let awsRegion: string = 'us-east-1'
 
 /**
  * Bootstrap application configuration.
@@ -90,6 +94,8 @@ export async function bootstrap(): Promise<Env> {
     return cachedEnv
   }
 
+  dotenvConfig()
+
   logger.info(
     {
       nodeEnv: process.env.NODE_ENV,
@@ -103,16 +109,23 @@ export async function bootstrap(): Promise<Env> {
   // Step 1: Load from SSM (if applicable)
   if (shouldUseSSM()) {
     try {
-      const ssmConfig = await loadFromSSM({
-        serviceName: process.env.SERVICE_NAME,
-        environment: process.env.NODE_ENV,
-        region: process.env.AWS_REGION,
+      const serviceNameValue = process.env.SERVICE_NAME || 'boilerplate'
+      const regionValue = process.env.AWS_REGION || 'us-east-1'
+      
+      awsRegion = regionValue
+
+      const ssmResult = await loadFromSSM({
+        serviceName: serviceNameValue,
+        region: regionValue,
       })
-      config = { ...ssmConfig }
+      config = { ...ssmResult.config }
+      flagNames = new Set(ssmResult.flagNames)
+      flagPaths = ssmResult.flagPaths
 
       logger.info(
         {
-          parameterCount: Object.keys(ssmConfig).length,
+          parameterCount: Object.keys(ssmResult.config).length,
+          flagCount: flagNames.size,
         },
         'Loaded configuration from SSM'
       )
@@ -183,11 +196,50 @@ export function loadEnv(overrides: Record<string, string> = {}): Env {
   return cachedEnv
 }
 
+/**
+ * Return the bootstrapped environment (cached).
+ */
 export function getEnv(): Env {
   if (!cachedEnv) {
     throw new Error('Environment not loaded. Call bootstrap() or loadEnv() first.')
   }
+
   return cachedEnv
+}
+
+/**
+ * Simple runtime config getter.
+ *
+ * If the key exists in the bootstrapped cached env, return it.
+ * Otherwise, if it's a flag (under /serviceName/flags/), fetch via getSSMParam and return that.
+ */
+export const config = {
+  async get(paramName: string): Promise<Env[keyof Env] | string | undefined> {
+    if (!cachedEnv) {
+      throw new Error('Environment not loaded. Call bootstrap() or loadEnv() first.')
+    }
+
+    const key = paramName as keyof Env
+    if (Object.prototype.hasOwnProperty.call(cachedEnv, key)) {
+      return cachedEnv[key]
+    }
+
+    if (!shouldUseSSM()) {
+      return undefined
+    }
+
+    if (!flagNames.has(paramName)) {
+      return undefined
+    }
+
+    const flagPath = flagPaths.get(paramName)
+    if (!flagPath) {
+      return undefined
+    }
+
+    const value = await getSSMParam(flagPath, awsRegion)
+    return value
+  },
 }
 
 export function isProduction(): boolean {
