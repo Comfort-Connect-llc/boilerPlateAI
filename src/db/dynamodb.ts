@@ -22,13 +22,14 @@ import { logger } from '../lib/logger.js'
 import { conflict, notFound } from '../lib/errors.js'
 import { v4 as uuid } from 'uuid'
 
+let baseClient: DynamoDBClient | null = null
 let docClient: DynamoDBDocumentClient | null = null
 
-export function getDynamoDB(): DynamoDBDocumentClient {
-  if (!docClient) {
+function getBaseClient(): DynamoDBClient {
+  if (!baseClient) {
     const env = getEnv()
 
-    const baseClient = new DynamoDBClient({
+    baseClient = new DynamoDBClient({
       region: env.AWS_REGION,
       credentials: {
         accessKeyId: env.AWS_ACCESS_KEY_ID,
@@ -36,8 +37,14 @@ export function getDynamoDB(): DynamoDBDocumentClient {
       },
       ...(env.DYNAMODB_ENDPOINT && { endpoint: env.DYNAMODB_ENDPOINT }),
     })
+  }
 
-    docClient = DynamoDBDocumentClient.from(baseClient, {
+  return baseClient
+}
+
+export function getDynamoDB(): DynamoDBDocumentClient {
+  if (!docClient) {
+    docClient = DynamoDBDocumentClient.from(getBaseClient(), {
       marshallOptions: {
         removeUndefinedValues: true,
         convertEmptyValues: true,
@@ -236,14 +243,10 @@ export async function queryItems<T>(options: QueryOptions): Promise<{
 
 export async function healthCheckDynamoDB(tableName: string): Promise<boolean> {
   try {
-    const client = getDynamoDB()
-    // Access the underlying DynamoDB client for DescribeTable
-    const baseClient = new DynamoDBClient({
-      region: getEnv().AWS_REGION,
-    })
-    await baseClient.send(new DescribeTableCommand({ TableName: tableName }))
+    await getBaseClient().send(new DescribeTableCommand({ TableName: tableName }))
     return true
   } catch {
     return false
   }
 }
+
