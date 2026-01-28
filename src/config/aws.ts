@@ -2,6 +2,37 @@ import { SSMClient, GetParametersByPathCommand } from '@aws-sdk/client-ssm'
 import { getEnv, isLocal, loadEnv } from './env.js'
 import { logger } from '../lib/logger.js'
 
+export interface AWSClientConfig {
+  region: string
+  credentials: {
+    accessKeyId: string
+    secretAccessKey: string
+  }
+}
+
+let cachedConfig: AWSClientConfig | null = null
+
+export function getAWSClientConfig(): AWSClientConfig {
+  if (cachedConfig) {
+    return cachedConfig
+  }
+
+  const env = getEnv()
+  cachedConfig = {
+    region: env.AWS_REGION,
+    credentials: {
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+    },
+  }
+
+  return cachedConfig
+}
+
+export function clearAWSConfigCache(): void {
+  cachedConfig = null
+}
+
 interface SSMParameter {
   Name: string
   Value: string
@@ -37,7 +68,6 @@ async function fetchSSMParameters(client: SSMClient, path: string): Promise<SSMP
 
 function convertSSMToEnvVars(params: SSMParameter[]): Record<string, string> {
   return params.reduce<Record<string, string>>((acc, param) => {
-    // Extract the key name from the full path and convert to uppercase
     const key = param.Name.split('/').pop()?.toUpperCase()
     if (key) {
       acc[key] = param.Value
@@ -47,7 +77,6 @@ function convertSSMToEnvVars(params: SSMParameter[]): Record<string, string> {
 }
 
 export async function bootstrapConfig(): Promise<void> {
-  // In local mode, just load from .env file
   if (process.env.NODE_ENV === 'local') {
     const dotenv = await import('dotenv')
     dotenv.config()
@@ -56,7 +85,6 @@ export async function bootstrapConfig(): Promise<void> {
     return
   }
 
-  // In non-local environments, fetch from SSM Parameter Store
   const ssmClient = new SSMClient({
     region: process.env.AWS_REGION || 'us-east-1',
     ...(isLocal() && {
@@ -82,7 +110,6 @@ export async function bootstrapConfig(): Promise<void> {
     ...convertSSMToEnvVars(serviceParams),
   }
 
-  // Load environment with SSM overrides
   loadEnv(ssmEnvVars)
 
   logger.info('Configuration loaded from SSM Parameter Store')

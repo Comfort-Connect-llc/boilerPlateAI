@@ -1,5 +1,5 @@
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns'
-import { getEnv } from '../config/env.js'
+import { getAWSClientConfig } from '../config/aws.js'
 import { logger } from './logger.js'
 import { getRequestId } from './request-context.js'
 
@@ -7,14 +7,7 @@ let snsClient: SNSClient | null = null
 
 function getSNSClient(): SNSClient {
   if (!snsClient) {
-    const env = getEnv()
-    snsClient = new SNSClient({
-      region: env.AWS_REGION,
-      credentials: {
-        accessKeyId: env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-      },
-    })
+    snsClient = new SNSClient(getAWSClientConfig())
   }
   return snsClient
 }

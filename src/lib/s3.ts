@@ -7,6 +7,7 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { getAWSClientConfig } from '../config/aws.js'
 import { getEnv } from '../config/env.js'
 import { logger } from './logger.js'
 import { notFound } from './errors.js'
@@ -15,14 +16,7 @@ let s3Client: S3Client | null = null
 
 function getS3Client(): S3Client {
   if (!s3Client) {
-    const env = getEnv()
-    s3Client = new S3Client({
-      region: env.AWS_REGION,
-      credentials: {
-        accessKeyId: env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-      },
-    })
+    s3Client = new S3Client(getAWSClientConfig())
   }
   return s3Client
 }

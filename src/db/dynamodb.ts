@@ -17,6 +17,7 @@ import {
   type QueryCommandInput,
   type ScanCommandInput,
 } from '@aws-sdk/lib-dynamodb'
+import { getAWSClientConfig } from '../config/aws.js'
 import { getEnv } from '../config/env.js'
 import { logger } from '../lib/logger.js'
 import { conflict, notFound } from '../lib/errors.js'
@@ -30,11 +31,7 @@ function getBaseClient(): DynamoDBClient {
     const env = getEnv()
 
     baseClient = new DynamoDBClient({
-      region: env.AWS_REGION,
-      credentials: {
-        accessKeyId: env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-      },
+      ...getAWSClientConfig(),
       ...(env.DYNAMODB_ENDPOINT && { endpoint: env.DYNAMODB_ENDPOINT }),
     })
   }
