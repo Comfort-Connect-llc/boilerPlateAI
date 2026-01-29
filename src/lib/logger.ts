@@ -191,6 +191,7 @@ const cloudwatchConfig: Record<string, unknown> = {
         : {}),
     })
   },
+  retentionInDays: 180,
   level: logLevel,
 }
 
