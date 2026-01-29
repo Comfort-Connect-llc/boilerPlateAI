@@ -1,4 +1,4 @@
-import { logger } from './lib/logger.js'
+import { logger, fatal } from './lib/logger.js'
 import { bootstrap } from './config/env.js'
 import { createApp } from './app.js'
 import { getEnv } from './config/env.js'
@@ -9,7 +9,6 @@ async function main() {
     // Bootstrap configuration (loads from SSM in production)
     logger.info('Bootstrapping configuration...')
     await bootstrap()
-    logger.info('Configuration bootstrapped successfully')
 
     const env = getEnv()
 
@@ -18,12 +17,12 @@ async function main() {
 
     // Start server
     const server = app.listen(env.PORT, () => {
-      logger.info({ port: env.PORT, env: env.NODE_ENV }, 'Server started')
+      logger.info('Server started', { port: env.PORT, env: env.NODE_ENV })
     })
 
     // Graceful shutdown handler
     const shutdown = async (signal: string) => {
-      logger.info({ signal }, 'Shutdown signal received')
+      logger.info('Shutdown signal received', { signal })
 
       // Stop accepting new connections
       server.close(async () => {
@@ -49,16 +48,16 @@ async function main() {
 
     // Handle uncaught errors
     process.on('uncaughtException', (error: Error) => {
-      logger.fatal({ err: error }, 'Uncaught exception')
+      fatal('Uncaught exception', { metadata: { err: error } })
       void shutdown('uncaughtException')
     })
 
     process.on('unhandledRejection', (reason: unknown) => {
-      logger.fatal({ reason }, 'Unhandled rejection')
+      fatal('Unhandled rejection', { metadata: { reason } })
       void shutdown('unhandledRejection')
     })
   } catch (error) {
-    logger.fatal({ err: error }, 'Failed to start server')
+    fatal('Failed to start server', { metadata: { err: error } })
     process.exit(1)
   }
 }

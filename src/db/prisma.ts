@@ -17,12 +17,12 @@ export function getPrisma(): PrismaClient {
     // Log queries in development
     if (process.env.NODE_ENV === 'development') {
       prisma.$on('query', (e) => {
-        logger.debug({ query: e.query, duration: e.duration }, 'Prisma query')
+        logger.debug('Prisma query', { query: e.query, duration: e.duration })
       })
     }
 
     prisma.$on('error', (e) => {
-      logger.error({ error: e }, 'Prisma error')
+      logger.error('Prisma error', { error: e })
     })
   }
 

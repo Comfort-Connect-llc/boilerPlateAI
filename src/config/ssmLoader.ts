@@ -1,5 +1,6 @@
 import { SSMClient, GetParametersByPathCommand, GetParameterCommand } from '@aws-sdk/client-ssm'
 import { logger } from '../lib/logger.js'
+import { getAWSClientConfig } from './aws.js'
 
 export interface SSMLoaderOptions {
   serviceName?: string
@@ -43,55 +44,41 @@ export async function loadFromSSM(
   options: SSMLoaderOptions = {}
 ): Promise<SSMLoadResult> {
   const {
-    serviceName = 'boilerplate',
-    region = 'us-east-1',
+    serviceName,
     customPaths = [],
   } = options
 
-  logger.info(
-    {
-      serviceName,
-      region,
-      customPaths,
-    },
-    'Loading configuration from SSM Parameter Store'
-  )
+  logger.info('Loading configuration from SSM Parameter Store', {
+    serviceName,
+    customPaths,
+  })
 
-  const client = new SSMClient({ region })
+  const awsConfig = getAWSClientConfig()
+  const client = new SSMClient(awsConfig)
   const config: Record<string, string> = {}
   const flagNames: string[] = []
   const flagPaths = new Map<string, string>()
 
   // Build paths in order (first = lowest priority)
-  const paths = [`/shared/`, `/${serviceName}/`, ...customPaths]
-  const flagsPath = `/${serviceName}/flags/`
+  const paths = [`/shared/common/`, `/api/${serviceName}/`, ...customPaths]
+  const flagsPath = `/api/${serviceName}/flags/`
 
   // Load from each path (later paths override earlier)
   for (const path of paths) {
     try {
-      const params = await loadParametersFromPath(
-        client,
-        path,
-        path === `/${serviceName}/` ? flagsPath : undefined
-      )
+      const params = await loadParametersFromPath(client, path, path === `/api/${serviceName}/` ? flagsPath : undefined)
       Object.assign(config, params)
 
-      logger.info(
-        {
-          path,
-          parameterCount: Object.keys(params).length,
-        },
-        'Loaded parameters from SSM path'
-      )
+      logger.info('Loaded parameters from SSM path', {
+        path,
+        parameterCount: Object.keys(params).length,
+      })
     } catch (error) {
       // Path might not exist, that's OK
-      logger.warn(
-        {
-          path,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        'Failed to load from SSM path (may not exist)'
-      )
+      logger.warn('Failed to load from SSM path (may not exist)', {
+        path,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      })
     }
   }
 
@@ -106,33 +93,24 @@ export async function loadFromSSM(
     }
 
     if (flagNames.length > 0) {
-      logger.info(
-        {
-          flagsPath,
-          flagCount: flagNames.length,
-          flagNames,
-        },
-        'Identified dynamic flag parameters'
-      )
+      logger.info('Identified dynamic flag parameters', {
+        flagsPath,
+        flagCount: flagNames.length,
+        flagNames,
+      })
     }
   } catch (error) {
     // Flags path might not exist, that's OK
-    logger.debug(
-      {
-        flagsPath,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      'No flags path found (this is OK)'
-    )
+    logger.debug('No flags path found (this is OK)', {
+      flagsPath,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    })
   }
 
-  logger.info(
-    {
-      totalParameters: Object.keys(config).length,
-      flagCount: flagNames.length,
-    },
-    'Completed loading from SSM Parameter Store'
-  )
+  logger.info('Completed loading from SSM Parameter Store', {
+    totalParameters: Object.keys(config).length,
+    flagCount: flagNames.length,
+  })
 
   return { config, flagNames, flagPaths }
 }
@@ -263,13 +241,10 @@ export async function getSSMParam(
     const response = await client.send(command)
     return response.Parameter?.Value
   } catch (error) {
-    logger.warn(
-      {
-        parameterName,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      'Failed to fetch SSM parameter'
-    )
+    logger.warn('Failed to fetch SSM parameter', {
+      parameterName,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    })
     return undefined
   }
 }
@@ -279,9 +254,3 @@ export async function getSSMParam(
  *
  * @returns true if SSM should be loaded
  */
-export function shouldUseSSM(): boolean {
-  const env = process.env.NODE_ENV
-
-  // Don't use SSM for local development or tests
-  return env !== 'local' && env !== 'test'
-}

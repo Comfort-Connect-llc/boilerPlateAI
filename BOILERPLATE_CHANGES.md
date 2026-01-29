@@ -40,6 +40,11 @@ Created reusable infrastructure components:
 
 ### 3. Abstracted Domain-Specific Code
 
+#### `src/lib/logger.ts`
+- **Winston** (replacing Pino): structured JSON logging with `fatal`, `error`, `warn`, `info`, `debug` levels.
+- **CloudWatch:** Logs are sent to AWS CloudWatch Logs (log group `/comfort-connect/{NODE_ENV}/{SERVICE_NAME}`). Level is controlled by `LOG_LEVEL` (hierarchical; e.g. `info` includes fatal, error, warn, info).
+- Sensitive data redaction (passwords, tokens, SSN, credit card patterns, etc.). Exported helpers: `info`, `warn`, `error`, `debug`, `fatal`, `createRequestLogger`.
+
 #### `src/lib/sns.ts`
 **Before:**
 ```typescript
@@ -79,6 +84,7 @@ Services now define their own event types and pass the topic ARN.
 **Added:**
 - Documentation on how to add service-specific variables
 - Kept only generic infrastructure config
+- **SSM bootstrap:** Async `bootstrap()` loads dotenv, then SSM from `/shared/common/` and `/api/{serviceName}/`, merges with `process.env`, validates with Zod, and caches. Dynamic flags under `/api/{serviceName}/flags/` are fetched on-demand via `config.get(paramName)`. Sync `loadEnv(overrides)` bypasses SSM (used in tests).
 
 #### `.env.example`
 **Before:**
@@ -199,9 +205,12 @@ boilerPlateAI/
 │   │   ├── base-service.ts            [NEW]
 │   │   ├── pagination.ts              [NEW]
 │   │   ├── query-builder.ts           [NEW]
+│   │   ├── logger.ts                  [MODIFIED - Winston, CloudWatch, redaction]
 │   │   └── sns.ts                     [MODIFIED - Genericized]
 │   ├── config/
-│   │   └── env.ts                     [MODIFIED - Removed domain vars]
+│   │   ├── env.ts                     [MODIFIED - SSM bootstrap, config.get, loadEnv]
+│   │   ├── aws.ts                     [Ready - getAWSClientConfig for SSM/S3/SNS]
+│   │   └── ssmLoader.ts               [NEW - loadFromSSM, getSSMParam, dynamic flags]
 │   ├── modules/
 │   │   ├── _example-entity/           [RENAMED from accounts/]
 │   │   │   ├── README.md              [NEW]

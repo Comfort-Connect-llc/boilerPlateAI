@@ -20,33 +20,40 @@ This guide shows how to set up AWS Systems Manager (SSM) Parameter Store for sec
 ## How It Works
 
 ### Local Development
-- Uses `.env` file (convenience)
-- SSM not loaded when `NODE_ENV=local` or `NODE_ENV=test`
+- Uses `.env` file (via `dotenv`) and/or environment variables
+- Bootstrap still attempts SSM; on failure (e.g. no AWS credentials or paths missing), falls back to env only
+- In tests, use `loadEnv()` to bypass SSM and load only from `process.env`
 
-### Production/Staging/Dev
-- Automatically loads from SSM on startup
-- Merges SSM + environment variables (env vars override)
-- No `.env` file needed
+### Production/Staging
+- On startup, `bootstrap()` loads from SSM then merges with environment variables (env overrides SSM)
+- No `.env` file needed; optional dynamic flags under `/api/{serviceName}/flags/` are fetched on-demand via `config.get()`
 
 ### Parameter Paths
 
 The application loads parameters from these paths in order (later overrides earlier):
 
-1. `/shared/{environment}/` - Shared across all services
-2. `/{service-name}/{environment}/` - Service-specific
+1. `/shared/common/` - Shared across all services
+2. `/api/{serviceName}/` - Service-specific
+3. Custom paths (if configured)
 
-Example for `SERVICE_NAME=my-service` in `production`:
+Parameters under `/api/{serviceName}/flags/` are **dynamic flags**: they are not loaded at bootstrap. Use `config.get(flagName)` at runtime to fetch them on-demand.
+
+Example for `SERVICE_NAME=boilerplate`:
 ```
-/shared/production/
+/shared/common/
   ├── AWS_REGION
   ├── LOG_LEVEL
   └── ...
 
-/my-service/production/
+/api/boilerplate/
   ├── DATABASE_URL
   ├── AUTH0_CLIENT_SECRET
   ├── STRIPE_SECRET_KEY
   └── ...
+
+/api/boilerplate/flags/
+  ├── FEATURE_X_ENABLED
+  └── FEATURE_Y_ENABLED
 ```
 
 ## Setup Instructions
@@ -57,40 +64,45 @@ Example for `SERVICE_NAME=my-service` in `production`:
 2. Click **Create parameter**
 
 **For shared parameters:**
-- Name: `/shared/production/LOG_LEVEL`
+- Name: `/shared/common/LOG_LEVEL`
 - Type: `String`
 - Value: `info`
 
 **For secrets:**
-- Name: `/my-service/production/AUTH0_CLIENT_SECRET`
+- Name: `/api/boilerplate/AUTH0_CLIENT_SECRET`
 - Type: `SecureString` (encrypted with KMS)
 - Value: `your-secret-value`
 
 **For service-specific config:**
-- Name: `/my-service/production/DATABASE_URL`
+- Name: `/api/boilerplate/DATABASE_URL`
 - Type: `SecureString`
 - Value: `postgresql://user:password@host:5432/db`
+
+**For dynamic flags (fetched on-demand):**
+- Name: `/api/boilerplate/flags/FEATURE_X_ENABLED`
+- Type: `String`
+- Value: `true` or `false`
 
 ### 2. Using AWS CLI
 
 ```bash
 # Shared parameter (String)
 aws ssm put-parameter \
-  --name "/shared/production/AWS_REGION" \
+  --name "/shared/common/AWS_REGION" \
   --value "us-east-1" \
   --type "String" \
   --description "AWS region for all services"
 
 # Service secret (SecureString - encrypted)
 aws ssm put-parameter \
-  --name "/my-service/production/AUTH0_CLIENT_SECRET" \
+  --name "/api/boilerplate/AUTH0_CLIENT_SECRET" \
   --value "your-secret-value" \
   --type "SecureString" \
-  --description "Auth0 client secret for my-service"
+  --description "Auth0 client secret"
 
 # Database URL
 aws ssm put-parameter \
-  --name "/my-service/production/DATABASE_URL" \
+  --name "/api/boilerplate/DATABASE_URL" \
   --value "postgresql://user:password@prod-db.rds.amazonaws.com:5432/mydb" \
   --type "SecureString"
 ```
@@ -108,34 +120,34 @@ variable "environment" {
   default = "production"
 }
 
-# Shared parameters
+# Shared parameters (path: /shared/common/)
 resource "aws_ssm_parameter" "shared_aws_region" {
-  name  = "/shared/${var.environment}/AWS_REGION"
+  name  = "/shared/common/AWS_REGION"
   type  = "String"
   value = var.aws_region
 }
 
 resource "aws_ssm_parameter" "shared_log_level" {
-  name  = "/shared/${var.environment}/LOG_LEVEL"
+  name  = "/shared/common/LOG_LEVEL"
   type  = "String"
   value = var.environment == "production" ? "info" : "debug"
 }
 
-# Service-specific parameters
+# Service-specific parameters (path: /api/{service_name}/)
 resource "aws_ssm_parameter" "database_url" {
-  name  = "/${var.service_name}/${var.environment}/DATABASE_URL"
+  name  = "/api/${var.service_name}/DATABASE_URL"
   type  = "SecureString"
   value = "postgresql://${var.db_user}:${random_password.db.result}@${aws_db_instance.main.endpoint}/${var.db_name}"
 }
 
 resource "aws_ssm_parameter" "auth0_secret" {
-  name  = "/${var.service_name}/${var.environment}/AUTH0_CLIENT_SECRET"
+  name  = "/api/${var.service_name}/AUTH0_CLIENT_SECRET"
   type  = "SecureString"
   value = var.auth0_client_secret
 }
 
 resource "aws_ssm_parameter" "s3_bucket" {
-  name  = "/${var.service_name}/${var.environment}/S3_BUCKET_NAME"
+  name  = "/api/${var.service_name}/S3_BUCKET_NAME"
   type  = "String"
   value = aws_s3_bucket.main.id
 }
@@ -156,7 +168,7 @@ Your application needs these IAM permissions to read from SSM:
         "ssm:GetParameter"
       ],
       "Resource": [
-        "arn:aws:ssm:us-east-1:ACCOUNT_ID:parameter/my-service/*",
+        "arn:aws:ssm:us-east-1:ACCOUNT_ID:parameter/api/*",
         "arn:aws:ssm:us-east-1:ACCOUNT_ID:parameter/shared/*"
       ]
     },
@@ -186,8 +198,8 @@ Attach this policy to your ECS Task Role:
       "Effect": "Allow",
       "Action": "ssm:GetParametersByPath",
       "Resource": [
-        "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ServiceName}/${Environment}/*",
-        "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/shared/${Environment}/*"
+        "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/api/${ServiceName}/*",
+        "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/shared/*"
       ]
     },
     {
@@ -206,17 +218,18 @@ Attach this policy to your ECS Task Role:
 
 ## Parameter Naming Convention
 
-Use UPPERCASE with underscores for parameter keys:
+Use UPPERCASE with underscores for parameter keys. Paths use `/api/{serviceName}/` and `/shared/common/`:
 
 ```
 ✅ Good:
-/my-service/production/DATABASE_URL
-/my-service/production/AUTH0_CLIENT_SECRET
-/shared/production/LOG_LEVEL
+/api/boilerplate/DATABASE_URL
+/api/boilerplate/AUTH0_CLIENT_SECRET
+/api/boilerplate/flags/FEATURE_X_ENABLED
+/shared/common/LOG_LEVEL
 
 ❌ Bad:
-/my-service/production/database-url
-/my-service/production/auth0ClientSecret
+/api/boilerplate/database-url
+/api/boilerplate/auth0ClientSecret
 ```
 
 ## Parameter Types
@@ -243,21 +256,21 @@ Use UPPERCASE with underscores for parameter keys:
 ```bash
 # List all parameters for your service
 aws ssm get-parameters-by-path \
-  --path "/my-service/production/" \
+  --path "/api/boilerplate/" \
   --recursive
 
 # List shared parameters
 aws ssm get-parameters-by-path \
-  --path "/shared/production/" \
+  --path "/shared/common/" \
   --recursive
 ```
 
 ### 2. Test in Development Environment
 
 ```bash
-# Set environment to dev (not local)
+# Set environment (SSM is attempted on bootstrap; use local/test to bypass)
 export NODE_ENV=development
-export SERVICE_NAME=my-service
+export SERVICE_NAME=boilerplate
 
 # Run the application
 npm start
@@ -273,7 +286,7 @@ npm start
 ```bash
 # Test reading a secure parameter
 aws ssm get-parameter \
-  --name "/my-service/production/AUTH0_CLIENT_SECRET" \
+  --name "/api/boilerplate/AUTH0_CLIENT_SECRET" \
   --with-decryption
 ```
 
@@ -284,14 +297,15 @@ aws ssm get-parameter \
 1. **Set environment variables:**
    ```bash
    NODE_ENV=production
-   SERVICE_NAME=my-service
+   SERVICE_NAME=boilerplate
    AWS_REGION=us-east-1
    ```
 
-2. **Application auto-loads from SSM:**
-   - Fetches from `/shared/production/`
-   - Fetches from `/my-service/production/`
-   - Merges with environment variables
+2. **Application auto-loads from SSM on bootstrap:**
+   - Fetches from `/shared/common/`
+   - Fetches from `/api/boilerplate/` (and custom paths if configured)
+   - Dynamic flags under `/api/boilerplate/flags/` are fetched on-demand via `config.get()`
+   - Merges with environment variables (env overrides SSM)
    - Starts server
 
 3. **No `.env` file needed!**
@@ -300,11 +314,11 @@ aws ssm get-parameter \
 
 1. Update parameter in SSM:
    ```bash
-   aws ssm put-parameter \
-     --name "/my-service/production/DATABASE_PASSWORD" \
-     --value "new-password" \
-     --type "SecureString" \
-     --overwrite
+  aws ssm put-parameter \
+    --name "/api/boilerplate/DATABASE_PASSWORD" \
+    --value "new-password" \
+    --type "SecureString" \
+    --overwrite
    ```
 
 2. Restart application (ECS, Lambda, etc.)
@@ -327,7 +341,7 @@ aws ssm get-parameter \
 export LOG_LEVEL=debug
 
 # Check SSM access
-aws ssm get-parameters-by-path --path "/shared/production/"
+aws ssm get-parameters-by-path --path "/shared/common/"
 ```
 
 ### Parameters not found
@@ -336,7 +350,7 @@ aws ssm get-parameters-by-path --path "/shared/production/"
 
 **Solution:**
 - This is a warning, not an error
-- Paths may not exist (e.g., `/shared/local/`)
+- Paths may not exist (e.g., `/shared/common/` or `/api/boilerplate/` empty)
 - Application falls back to environment variables
 
 ### KMS decryption errors
@@ -379,28 +393,30 @@ Compare to managing `.env` files in S3:
 ## Example: Complete Setup for New Service
 
 ```bash
-# 1. Create shared parameters (once per environment)
-aws ssm put-parameter --name "/shared/production/AWS_REGION" --value "us-east-1" --type "String"
-aws ssm put-parameter --name "/shared/production/LOG_LEVEL" --value "info" --type "String"
+# 1. Create shared parameters (once)
+aws ssm put-parameter --name "/shared/common/AWS_REGION" --value "us-east-1" --type "String"
+aws ssm put-parameter --name "/shared/common/LOG_LEVEL" --value "info" --type "String"
 
 # 2. Create service-specific parameters
-SERVICE=my-service
-ENV=production
+SERVICE=boilerplate
 
-aws ssm put-parameter --name "/$SERVICE/$ENV/AUTH0_DOMAIN" --value "tenant.auth0.com" --type "String"
-aws ssm put-parameter --name "/$SERVICE/$ENV/AUTH0_AUDIENCE" --value "https://api.example.com" --type "String"
-aws ssm put-parameter --name "/$SERVICE/$ENV/AUTH0_CLIENT_ID" --value "xxx" --type "String"
-aws ssm put-parameter --name "/$SERVICE/$ENV/AUTH0_CLIENT_SECRET" --value "xxx" --type "SecureString"
-aws ssm put-parameter --name "/$SERVICE/$ENV/AUTH0_ISSUER_BASE_URL" --value "https://tenant.auth0.com" --type "String"
-aws ssm put-parameter --name "/$SERVICE/$ENV/DATABASE_URL" --value "postgresql://..." --type "SecureString"
-aws ssm put-parameter --name "/$SERVICE/$ENV/DYNAMODB_TABLE_PREFIX" --value "$SERVICE" --type "String"
-aws ssm put-parameter --name "/$SERVICE/$ENV/S3_BUCKET_NAME" --value "$SERVICE-$ENV-bucket" --type "String"
+aws ssm put-parameter --name "/api/$SERVICE/AUTH0_DOMAIN" --value "tenant.auth0.com" --type "String"
+aws ssm put-parameter --name "/api/$SERVICE/AUTH0_AUDIENCE" --value "https://api.example.com" --type "String"
+aws ssm put-parameter --name "/api/$SERVICE/AUTH0_CLIENT_ID" --value "xxx" --type "String"
+aws ssm put-parameter --name "/api/$SERVICE/AUTH0_CLIENT_SECRET" --value "xxx" --type "SecureString"
+aws ssm put-parameter --name "/api/$SERVICE/AUTH0_ISSUER_BASE_URL" --value "https://tenant.auth0.com" --type "String"
+aws ssm put-parameter --name "/api/$SERVICE/DATABASE_URL" --value "postgresql://..." --type "SecureString"
+aws ssm put-parameter --name "/api/$SERVICE/DYNAMODB_TABLE_PREFIX" --value "$SERVICE" --type "String"
+aws ssm put-parameter --name "/api/$SERVICE/S3_BUCKET_NAME" --value "$SERVICE-bucket" --type "String"
 
-# 3. Deploy with environment variables
-export NODE_ENV=$ENV
+# 3. (Optional) Dynamic flags - fetched on-demand via config.get('FEATURE_X_ENABLED')
+aws ssm put-parameter --name "/api/$SERVICE/flags/FEATURE_X_ENABLED" --value "true" --type "String"
+
+# 4. Deploy with environment variables
+export NODE_ENV=production
 export SERVICE_NAME=$SERVICE
 
-# 4. Start application - config loads automatically!
+# 5. Start application - config loads automatically!
 npm start
 ```
 
@@ -415,8 +431,9 @@ If you're currently using `.env` files stored in S3:
 
 2. **Create SSM parameters:**
    ```bash
-   # For each line in .env, create an SSM parameter
-   KEY=VALUE → aws ssm put-parameter --name "/service/env/KEY" --value "VALUE" --type "SecureString"
+   # For each line in .env, create an SSM parameter (shared or service path)
+   # Shared: /shared/common/KEY | Service: /api/boilerplate/KEY
+   aws ssm put-parameter --name "/api/boilerplate/KEY" --value "VALUE" --type "SecureString"
    ```
 
 3. **Test in development:**

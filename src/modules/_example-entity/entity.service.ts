@@ -81,7 +81,7 @@ export async function createAccount(input: CreateAccountInput): Promise<AccountE
     email: account.email,
   })
 
-  logger.info({ accountId: account.id }, 'Account created')
+  logger.info('Account created', { accountId: account.id })
 
   return account
 }
@@ -222,7 +222,7 @@ export async function updateAccount(
     changes,
   })
 
-  logger.info({ accountId: id }, 'Account updated')
+  logger.info('Account updated', { accountId: id })
 
   return updated
 }
@@ -254,5 +254,5 @@ export async function deleteAccount(id: string): Promise<void> {
     accountId: id,
   })
 
-  logger.info({ accountId: id }, 'Account deleted')
+  logger.info('Account deleted', { accountId: id })
 }

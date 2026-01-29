@@ -105,7 +105,7 @@ export async function publishEvent<T = unknown>(
   payload: T
 ): Promise<string | null> {
   if (!topicArn) {
-    logger.warn({ eventType }, 'SNS topic ARN not configured, skipping publish')
+    logger.warn('SNS topic ARN not configured, skipping publish', { eventType })
     return null
   }
 

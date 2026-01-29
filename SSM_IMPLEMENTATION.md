@@ -54,8 +54,9 @@
 
 ```typescript
 // src/config/ssmLoader.ts
-import { SSMClient, GetParametersByPathCommand, Parameter } from '@aws-sdk/client-ssm';
-import { logger } from '../lib/logger';
+import { SSMClient, GetParametersByPathCommand, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { logger } from '../lib/logger.js';
+import { getAWSClientConfig } from './aws.js';
 
 export interface SSMLoaderOptions {
   serviceName?: string;
@@ -64,122 +65,111 @@ export interface SSMLoaderOptions {
   customPaths?: string[];
 }
 
+export interface SSMLoadResult {
+  config: Record<string, string>;
+  flagNames: string[];
+  flagPaths: Map<string, string>;
+}
+
 /**
  * Load configuration from AWS SSM Parameter Store.
  *
  * Loading order (last wins):
- * 1. Custom paths (in order provided)
- * 2. Service-specific path: /{serviceName}/{environment}/
- * 3. Shared path: /shared/{environment}/
+ * 1. Shared path: /shared/common/
+ * 2. Service-specific path: /api/{serviceName}/
+ * 3. Custom paths (in order provided)
+ *
+ * Parameters under /api/{serviceName}/flags/ are dynamic flags (fetched on-demand via config.get()).
  *
  * Example SSM structure:
- *   /myservice/production/
+ *   /api/boilerplate/
  *     - DB_HOST
  *     - STRIPE_SECRET_KEY
- *   /shared/production/
+ *   /api/boilerplate/flags/
+ *     - FEATURE_X_ENABLED
+ *   /shared/common/
  *     - AWS_REGION
  *     - LOG_LEVEL
  *
  * @param options - Configuration options
- * @returns Object with environment variables from SSM
+ * @returns SSMLoadResult with config, flagNames, and flagPaths
  */
 export async function loadFromSSM(
   options: SSMLoaderOptions = {}
-): Promise<Record<string, string>> {
+): Promise<SSMLoadResult> {
   const {
     serviceName = process.env.SERVICE_NAME || 'boilerplate',
-    environment = process.env.NODE_ENV || 'development',
     region = process.env.AWS_REGION || 'us-east-1',
     customPaths = [],
   } = options;
 
-  logger.info({
+  logger.info('Loading configuration from SSM Parameter Store', {
     serviceName,
-    environment,
-    region,
-    customPaths
-  }, 'Loading configuration from SSM Parameter Store');
+    customPaths,
+  });
 
-  const client = new SSMClient({ region });
+  const awsConfig = getAWSClientConfig();
+  const client = new SSMClient(awsConfig);
   const config: Record<string, string> = {};
+  const flagNames: string[] = [];
+  const flagPaths = new Map<string, string>();
+  const paths = [`/shared/common/`, `/api/${serviceName}/`, ...customPaths];
+  const flagsPath = `/api/${serviceName}/flags/`;
 
-  // Build paths in order (first = lowest priority)
-  const paths = [
-    `/shared/${environment}/`,
-    `/${serviceName}/${environment}/`,
-    ...customPaths,
-  ];
-
-  // Load from each path (later paths override earlier)
   for (const path of paths) {
     try {
-      const params = await loadParametersFromPath(client, path);
+      const params = await loadParametersFromPath(client, path, path === `/api/${serviceName}/` ? flagsPath : undefined);
       Object.assign(config, params);
-
-      logger.info({
-        path,
-        parameterCount: Object.keys(params).length
-      }, 'Loaded parameters from SSM path');
+      logger.info('Loaded parameters from SSM path', { path, parameterCount: Object.keys(params).length });
     } catch (error) {
-      // Path might not exist (e.g., /shared/local/), that's OK
-      logger.warn({
+      logger.warn('Failed to load from SSM path (may not exist)', {
         path,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      }, 'Failed to load from SSM path (may not exist)');
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
     }
   }
 
-  logger.info({
-    totalParameters: Object.keys(config).length
-  }, 'Completed loading from SSM Parameter Store');
+  try {
+    const flagParams = await loadParametersFromPathWithFullPaths(client, flagsPath);
+    for (const fullPath of Object.keys(flagParams)) {
+      const flagName = extractKeyFromPath(fullPath, flagsPath);
+      flagNames.push(flagName);
+      flagPaths.set(flagName, fullPath);
+    }
+  } catch {
+    // Flags path may not exist
+  }
 
-  return config;
+  logger.info('Completed loading from SSM Parameter Store', {
+    totalParameters: Object.keys(config).length,
+    flagCount: flagNames.length,
+  });
+
+  return { config, flagNames, flagPaths };
 }
 
 /**
- * Load all parameters from a specific SSM path.
- *
- * @param client - SSM client
- * @param path - Parameter path (e.g., /myservice/production/)
- * @returns Object with parameter names and values
+ * Load all parameters from a specific SSM path. Optionally exclude a subpath (e.g. flags).
  */
 async function loadParametersFromPath(
   client: SSMClient,
-  path: string
+  path: string,
+  excludePathPrefix?: string
 ): Promise<Record<string, string>> {
-  const parameters: Record<string, string> = {};
-  let nextToken: string | undefined;
-
-  do {
-    const command = new GetParametersByPathCommand({
-      Path: path,
-      Recursive: true,
-      WithDecryption: true, // Decrypt SecureString parameters
-      NextToken: nextToken,
-    });
-
-    const response = await client.send(command);
-
-    // Process parameters
-    if (response.Parameters) {
-      for (const param of response.Parameters) {
-        const key = extractKeyFromPath(param.Name!, path);
-        parameters[key] = param.Value!;
-      }
-    }
-
-    nextToken = response.NextToken;
-  } while (nextToken);
-
+  // ... GetParametersByPathCommand, skip params where param.Name starts with excludePathPrefix
   return parameters;
 }
+
+/**
+ * getSSMParam(parameterName, region?) - Fetches a single parameter by full path (e.g. /api/boilerplate/flags/FEATURE_X_ENABLED).
+ */
 
 /**
  * Extract parameter key from full SSM path.
  *
  * Examples:
- *   /myservice/production/DB_HOST -> DB_HOST
- *   /shared/production/LOG_LEVEL -> LOG_LEVEL
+ *   /api/boilerplate/DB_HOST -> DB_HOST
+ *   /shared/common/LOG_LEVEL -> LOG_LEVEL
  *   /custom/path/to/API_KEY -> API_KEY
  *
  * @param fullPath - Full parameter path
@@ -195,247 +185,27 @@ function extractKeyFromPath(fullPath: string, basePath: string): string {
   // Example: /db/host -> DB_HOST
   return segments.join('_').toUpperCase();
 }
-
-/**
- * Check if SSM should be used based on environment.
- *
- * @returns true if SSM should be loaded
- */
-export function shouldUseSSM(): boolean {
-  const env = process.env.NODE_ENV;
-
-  // Don't use SSM for local development or tests
-  return env !== 'local' && env !== 'test';
-}
 ```
 
 ---
 
-### 2. Update Environment Config
+### 2. Environment Config (`src/config/env.ts`)
 
-```typescript
-// src/config/env.ts
-import { z } from 'zod';
-import { loadFromSSM, shouldUseSSM } from './ssmLoader';
-import { logger } from '../lib/logger';
+**Bootstrap order:**
+1. Load `.env` via `dotenv`
+2. Load from SSM (`loadFromSSM` → `config`, `flagNames`, `flagPaths`); on failure, fall back to env only
+3. Merge with `process.env` (env vars override SSM)
+4. Validate with Zod schema and freeze
 
-const envSchema = z.object({
-  // Environment
-  NODE_ENV: z.enum(['development', 'production', 'test', 'local']).default('development'),
-  PORT: z.coerce.number().default(3000),
-  SERVICE_NAME: z.string().default('boilerplate'),
+**Runtime config:** Use `config.get(paramName)` for async lookup. If the key is a known flag (under `/api/{serviceName}/flags/`), it is fetched from SSM on-demand; otherwise the value comes from the cached env.
 
-  // Auth0
-  AUTH0_DOMAIN: z.string().min(1),
-  AUTH0_AUDIENCE: z.string().min(1),
-  AUTH0_CLIENT_ID: z.string().min(1),
-  AUTH0_CLIENT_SECRET: z.string().min(1),
-  AUTH0_ISSUER_BASE_URL: z.string().url(),
-
-  // Auth0 M2M (for internal API calls)
-  AUTH0_M2M_CLIENT_ID: z.string().optional(),
-  AUTH0_M2M_CLIENT_SECRET: z.string().optional(),
-
-  // AWS
-  AWS_REGION: z.string().default('us-east-1'),
-  AWS_ACCESS_KEY_ID: z.string().min(1),
-  AWS_SECRET_ACCESS_KEY: z.string().min(1),
-
-  // PostgreSQL
-  DATABASE_URL: z.string().min(1),
-
-  // DynamoDB
-  DYNAMODB_TABLE_PREFIX: z.string().default('boilerplate'),
-  DYNAMODB_ENDPOINT: z.string().optional(),
-
-  // S3
-  S3_BUCKET_NAME: z.string().min(1),
-  S3_PRESIGNED_URL_EXPIRY: z.coerce.number().default(3600),
-
-  // Internal Services
-  INTERNAL_DOMAINS: z.string().optional(),
-
-  // Logging
-  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
-});
-
-export type Env = z.infer<typeof envSchema>;
-
-let cachedEnv: Env | null = null;
-
-/**
- * Bootstrap application configuration.
- *
- * Loading order:
- * 1. Load from SSM (if not local/test)
- * 2. Merge with process.env (env vars override SSM)
- * 3. Validate with Zod schema
- * 4. Freeze and cache
- *
- * This ensures:
- * - Local dev uses .env files (convenience)
- * - Production uses SSM (security)
- * - Environment variables can override SSM (flexibility)
- * - Configuration is immutable after bootstrap
- */
-export async function bootstrap(): Promise<Env> {
-  if (cachedEnv) {
-    logger.warn('Configuration already bootstrapped');
-    return cachedEnv;
-  }
-
-  logger.info({
-    nodeEnv: process.env.NODE_ENV,
-    useSSM: shouldUseSSM()
-  }, 'Bootstrapping application configuration');
-
-  let config: Record<string, string | undefined> = {};
-
-  // Step 1: Load from SSM (if applicable)
-  if (shouldUseSSM()) {
-    try {
-      const ssmConfig = await loadFromSSM({
-        serviceName: process.env.SERVICE_NAME,
-        environment: process.env.NODE_ENV,
-        region: process.env.AWS_REGION,
-      });
-      config = { ...ssmConfig };
-
-      logger.info({
-        parameterCount: Object.keys(ssmConfig).length
-      }, 'Loaded configuration from SSM');
-    } catch (error) {
-      logger.error({
-        error: error instanceof Error ? error.message : 'Unknown error'
-      }, 'Failed to load from SSM, falling back to environment variables');
-    }
-  } else {
-    logger.info('Skipping SSM (local/test environment)');
-  }
-
-  // Step 2: Merge with environment variables (env vars override SSM)
-  config = {
-    ...config,
-    ...process.env,
-  };
-
-  // Step 3: Validate
-  const parsed = envSchema.safeParse(config);
-
-  if (!parsed.success) {
-    const formatted = parsed.error.issues
-      .map(issue => `  - ${issue.path.join('.')}: ${issue.message}`)
-      .join('\n');
-    throw new Error(`Configuration validation failed:\n${formatted}`);
-  }
-
-  // Step 4: Freeze and cache
-  cachedEnv = Object.freeze(parsed.data);
-
-  logger.info({
-    nodeEnv: cachedEnv.NODE_ENV,
-    serviceName: cachedEnv.SERVICE_NAME,
-    port: cachedEnv.PORT
-  }, 'Configuration bootstrapped successfully');
-
-  return cachedEnv;
-}
-
-/**
- * Get cached configuration.
- * Must call bootstrap() first.
- */
-export function getEnv(): Env {
-  if (!cachedEnv) {
-    throw new Error('Configuration not loaded. Call bootstrap() first.');
-  }
-  return cachedEnv;
-}
-
-/**
- * Load environment synchronously (for backward compatibility).
- * Only use in local/test environments.
- * For production, use bootstrap() instead.
- */
-export function loadEnv(overrides: Record<string, string> = {}): Env {
-  if (shouldUseSSM()) {
-    throw new Error(
-      'Cannot use loadEnv() in non-local environment. Use bootstrap() instead.'
-    );
-  }
-
-  const raw = { ...process.env, ...overrides };
-  const parsed = envSchema.safeParse(raw);
-
-  if (!parsed.success) {
-    const formatted = parsed.error.issues
-      .map(issue => `  - ${issue.path.join('.')}: ${issue.message}`)
-      .join('\n');
-    throw new Error(`Environment validation failed:\n${formatted}`);
-  }
-
-  cachedEnv = parsed.data;
-  return cachedEnv;
-}
-
-export function isProduction(): boolean {
-  return getEnv().NODE_ENV === 'production';
-}
-
-export function isDevelopment(): boolean {
-  return getEnv().NODE_ENV === 'development';
-}
-
-export function isLocal(): boolean {
-  return getEnv().NODE_ENV === 'local';
-}
-
-export function getInternalDomains(): string[] {
-  const domains = getEnv().INTERNAL_DOMAINS;
-  return domains ? domains.split(',').map(d => d.trim()) : [];
-}
-```
+**Sync load:** `loadEnv(overrides)` bypasses SSM and loads only from `process.env` (used in tests/local).
 
 ---
 
-### 3. Update Server Startup
+### 3. Server Startup (`src/index.ts`)
 
-```typescript
-// src/server.ts
-import { bootstrap } from './config/env';
-import { createApp } from './app';
-import { logger } from './lib/logger';
-import { gracefulShutdown } from './lib/shutdown';
-
-async function main() {
-  try {
-    // Bootstrap configuration FIRST (loads from SSM)
-    await bootstrap();
-
-    // Now start the server
-    const app = createApp();
-    const env = getEnv();
-
-    const server = app.listen(env.PORT, () => {
-      logger.info({
-        port: env.PORT,
-        nodeEnv: env.NODE_ENV,
-        serviceName: env.SERVICE_NAME
-      }, 'Server started successfully');
-    });
-
-    // Setup graceful shutdown
-    process.on('SIGTERM', () => gracefulShutdown(server));
-    process.on('SIGINT', () => gracefulShutdown(server));
-
-  } catch (error) {
-    logger.fatal({ error }, 'Failed to start server');
-    process.exit(1);
-  }
-}
-
-main();
-```
+Entry point calls `bootstrap()` first (loads dotenv then SSM, merges, validates), then `getEnv()` and `createApp()`. Graceful shutdown closes the HTTP server and disconnects Prisma. Uses `logger` and `fatal` from `src/lib/logger.js`.
 
 ---
 
@@ -445,7 +215,7 @@ main();
 // tests/setup.ts
 import { loadEnv } from '../src/config/env';
 
-// Tests use .env file, not SSM
+// Tests typically bypass SSM and load only from env + overrides
 process.env.NODE_ENV = 'test';
 
 loadEnv({
@@ -466,17 +236,19 @@ loadEnv({
 1. Go to AWS Systems Manager → Parameter Store
 2. Create parameters:
 
-   Name: /myservice/production/DB_HOST
+   Name: /api/boilerplate/DB_HOST
    Type: SecureString (for secrets) or String
    Value: prod-db.rds.amazonaws.com
 
-   Name: /myservice/production/AUTH0_CLIENT_SECRET
+   Name: /api/boilerplate/AUTH0_CLIENT_SECRET
    Type: SecureString
    Value: your-secret-value
 
-   Name: /shared/production/LOG_LEVEL
+   Name: /shared/common/LOG_LEVEL
    Type: String
    Value: info
+
+   (Optional) Dynamic flags: /api/boilerplate/flags/FEATURE_X_ENABLED
 ```
 
 ### 2. Using AWS CLI
@@ -484,20 +256,20 @@ loadEnv({
 ```bash
 # Create secure string (encrypted)
 aws ssm put-parameter \
-  --name "/myservice/production/DB_PASSWORD" \
+  --name "/api/boilerplate/DB_PASSWORD" \
   --value "super-secret-password" \
   --type "SecureString" \
   --description "Production database password"
 
 # Create regular string
 aws ssm put-parameter \
-  --name "/myservice/production/DB_HOST" \
+  --name "/api/boilerplate/DB_HOST" \
   --value "prod-db.rds.amazonaws.com" \
   --type "String"
 
-# Create shared parameter
+# Shared parameter
 aws ssm put-parameter \
-  --name "/shared/production/AWS_REGION" \
+  --name "/shared/common/AWS_REGION" \
   --value "us-east-1" \
   --type "String"
 ```
@@ -507,34 +279,34 @@ aws ssm put-parameter \
 ```hcl
 # terraform/ssm.tf
 
-# Service-specific parameters
+# Service-specific parameters (path: /api/{service_name}/)
 resource "aws_ssm_parameter" "db_host" {
-  name  = "/${var.service_name}/${var.environment}/DB_HOST"
+  name  = "/api/${var.service_name}/DB_HOST"
   type  = "String"
   value = aws_db_instance.main.endpoint
 }
 
 resource "aws_ssm_parameter" "db_password" {
-  name  = "/${var.service_name}/${var.environment}/DB_PASSWORD"
+  name  = "/api/${var.service_name}/DB_PASSWORD"
   type  = "SecureString"
   value = random_password.db.result
 }
 
 resource "aws_ssm_parameter" "auth0_secret" {
-  name  = "/${var.service_name}/${var.environment}/AUTH0_CLIENT_SECRET"
+  name  = "/api/${var.service_name}/AUTH0_CLIENT_SECRET"
   type  = "SecureString"
   value = var.auth0_client_secret
 }
 
-# Shared parameters
+# Shared parameters (path: /shared/common/)
 resource "aws_ssm_parameter" "shared_region" {
-  name  = "/shared/${var.environment}/AWS_REGION"
+  name  = "/shared/common/AWS_REGION"
   type  = "String"
   value = var.aws_region
 }
 
 resource "aws_ssm_parameter" "shared_log_level" {
-  name  = "/shared/${var.environment}/LOG_LEVEL"
+  name  = "/shared/common/LOG_LEVEL"
   type  = "String"
   value = var.environment == "production" ? "info" : "debug"
 }
@@ -557,7 +329,7 @@ resource "aws_ssm_parameter" "shared_log_level" {
         "ssm:GetParameter"
       ],
       "Resource": [
-        "arn:aws:ssm:us-east-1:ACCOUNT_ID:parameter/myservice/*",
+        "arn:aws:ssm:us-east-1:ACCOUNT_ID:parameter/api/*",
         "arn:aws:ssm:us-east-1:ACCOUNT_ID:parameter/shared/*"
       ]
     },
@@ -589,8 +361,8 @@ resource "aws_ssm_parameter" "shared_log_level" {
         "ssm:GetParametersByPath"
       ],
       "Resource": [
-        "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ServiceName}/${Environment}/*",
-        "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/shared/${Environment}/*"
+        "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/api/${ServiceName}/*",
+        "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/shared/*"
       ]
     },
     {
@@ -647,12 +419,12 @@ S3_BUCKET_NAME=local-bucket
 ```bash
 # Only need these environment variables in ECS/Lambda
 NODE_ENV=production
-SERVICE_NAME=myservice
+SERVICE_NAME=boilerplate
 AWS_REGION=us-east-1
 
 # Everything else loaded from SSM automatically:
-# - /myservice/production/* (service-specific)
-# - /shared/production/* (shared across services)
+# - /api/boilerplate/* (service-specific)
+# - /shared/common/* (shared). Dynamic flags: /api/boilerplate/flags/*
 ```
 
 ---

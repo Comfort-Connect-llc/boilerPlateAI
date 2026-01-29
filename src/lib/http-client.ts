@@ -50,7 +50,7 @@ export async function httpRequest<T = unknown>(
   const timeoutId = setTimeout(() => controller.abort(), timeout)
 
   try {
-    logger.debug({ url, method }, 'Making HTTP request')
+    logger.debug('Making HTTP request', { url, method })
 
     const response = await fetch(url, {
       method,
@@ -68,10 +68,11 @@ export async function httpRequest<T = unknown>(
       data = (await response.text()) as T
     }
 
-    logger.debug(
-      { url, method, status: response.status },
-      'HTTP request completed'
-    )
+    logger.debug('HTTP request completed', {
+      url,
+      method,
+      status: response.status,
+    })
 
     return {
       status: response.status,

@@ -406,49 +406,36 @@ export const listInvoicesSchema = paginationSchema.extend({
 
 ## Logging
 
-### Structured Logging with Pino
+### Structured Logging with Winston
 
 **Location:** `src/lib/logger.ts`
 
-**Why Pino:**
-- Extremely fast (asynchronous logging)
-- JSON output for log aggregation (CloudWatch, ELK)
-- Automatic request context binding
-- Sensitive data redaction
+**Features:**
+- Winston with JSON structured format for log aggregation (CloudWatch, ELK)
+- **CloudWatch transport**: logs are sent to AWS CloudWatch Logs (log group `/comfort-connect/{NODE_ENV}/{SERVICE_NAME}`); level is controlled by `LOG_LEVEL` (hierarchical: e.g. `info` includes fatal, error, warn, info)
+- Sensitive data redaction (passwords, tokens, SSN, credit card patterns, etc.)
+- Log levels: `fatal`, `error`, `warn`, `info`, `debug` (configurable via `LOG_LEVEL` env or SSM)
 
 ### Usage
 
 ```typescript
-// Basic logging
-logger.info('Invoice created')
-logger.error({ err }, 'Failed to process payment')
+import { logger, info, warn, error, debug, fatal } from './lib/logger.js'
 
-// With context
-logger.info({ invoiceId, amount }, 'Invoice paid')
+info('Invoice created', { event: 'InvoiceCreated', metadata: { invoiceId } })
+error('Failed to process payment', { event: 'PaymentFailed', metadata: { err } })
+warn('Rate limit approaching', { event: 'RateLimit', metadata: { remaining } })
+debug('Cache hit', { event: 'Cache', metadata: { key } })
+fatal('Unrecoverable error', { event: 'Fatal', metadata: { err } })
 
-// Automatic redaction
-logger.info({ password: 'secret123' })
-// Output: { password: '[REDACTED]' }
+const requestLogger = createRequestLogger(req, requestId)
+requestLogger.info('Request completed')
 ```
 
-### Request Logging
+Sensitive keys and patterns (SSN, credit card, etc.) are redacted before output. Request metadata (method, url, sessionId, companyId, profile) is included when passed via the meta argument.
 
-Automatically logs all HTTP requests:
+### CloudWatch
 
-```json
-{
-  "req": {
-    "method": "POST",
-    "url": "/api/v1/invoices",
-    "id": "req-abc123"
-  },
-  "res": {
-    "statusCode": 201
-  },
-  "responseTime": 45,
-  "msg": "request completed"
-}
-```
+Logs are written to CloudWatch when AWS credentials are available. The same `LOG_LEVEL` applies to both console and CloudWatch (e.g. `info` sends fatal, error, warn, and info to CloudWatch).
 
 ---
 

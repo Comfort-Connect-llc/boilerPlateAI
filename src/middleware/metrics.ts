@@ -26,6 +26,7 @@ export function metricsMiddleware(req: Request, res: Response, next: NextFunctio
     const logger = getLogger() || rootLogger
 
     logger.info(
+      'Request completed',
       {
         method: req.method,
         path: req.path,
@@ -33,7 +34,6 @@ export function metricsMiddleware(req: Request, res: Response, next: NextFunctio
         duration,
         requestId: getRequestId(),
       },
-      'Request completed'
     )
   })
 

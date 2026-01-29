@@ -1,8 +1,7 @@
-import express, { type Express } from 'express'
+import express, { type Express, type Request, type Response, type NextFunction } from 'express'
 import helmet from 'helmet'
 import cors from 'cors'
 import compression from 'compression'
-import pinoHttp from 'pino-http'
 
 import { logger } from './lib/logger.js'
 import { requestContextMiddleware } from './lib/request-context.js'
@@ -30,14 +29,30 @@ export function createApp(): Express {
   app.use(compression())
 
   // Request logging
-  app.use(
-    pinoHttp({
-      logger,
-      autoLogging: {
-        ignore: (req) => req.url?.includes('/health') ?? false,
-      },
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.url?.includes('/health')) {
+      return next()
+    }
+
+    const start = Date.now()
+    const { method, originalUrl } = req
+
+    res.on('finish', () => {
+      const duration = Date.now() - start
+      logger.info('HTTP Request', {
+        event: 'http_request',
+        metadata: {
+          method,
+          url: originalUrl,
+          statusCode: res.statusCode,
+          duration,
+          userAgent: req.get('user-agent'),
+        },
+      })
     })
-  )
+
+    next()
+  })
 
   // Request context (AsyncLocalStorage) - must be early in the chain
   app.use(requestContextMiddleware)

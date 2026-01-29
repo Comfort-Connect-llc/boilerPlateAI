@@ -44,7 +44,7 @@ export async function uploadFile(options: UploadOptions): Promise<string> {
   })
 
   await getS3Client().send(command)
-  logger.debug({ key, contentType }, 'File uploaded to S3')
+  logger.debug('File uploaded to S3', { key, contentType })
 
   return key
 }
@@ -81,7 +81,7 @@ export async function deleteFile(key: string): Promise<void> {
   })
 
   await getS3Client().send(command)
-  logger.debug({ key }, 'File deleted from S3')
+  logger.debug('File deleted from S3', { key })
 }
 
 export async function fileExists(key: string): Promise<boolean> {
@@ -126,7 +126,7 @@ export async function getPresignedDownloadUrl(options: PresignedUrlOptions): Pro
     expiresIn: expiresIn ?? env.S3_PRESIGNED_URL_EXPIRY,
   })
 
-  logger.debug({ key }, 'Generated presigned download URL')
+  logger.debug('Generated presigned download URL', { key })
   return url
 }
 
@@ -144,7 +144,7 @@ export async function getPresignedUploadUrl(options: PresignedUrlOptions): Promi
     expiresIn: expiresIn ?? env.S3_PRESIGNED_URL_EXPIRY,
   })
 
-  logger.debug({ key, contentType }, 'Generated presigned upload URL')
+  logger.debug('Generated presigned upload URL', { key, contentType })
   return url
 }
 

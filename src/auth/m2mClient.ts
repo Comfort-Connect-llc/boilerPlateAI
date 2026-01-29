@@ -81,16 +81,17 @@ class M2MClient {
       this.expiresAt = Date.now() + (data.expires_in - bufferSeconds) * 1000
 
       logger.info(
+        'M2M token refreshed',
         {
           expiresIn: data.expires_in,
           expiresAt: new Date(this.expiresAt).toISOString(),
         },
-        'M2M token refreshed'
+        
       )
 
       return this.token
     } catch (error) {
-      logger.error({ error }, 'Failed to refresh M2M token')
+      logger.error('Failed to refresh M2M token', { error })
       throw error
     }
   }

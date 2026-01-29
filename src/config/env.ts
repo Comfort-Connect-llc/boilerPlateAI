@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { config as dotenvConfig } from 'dotenv'
-import { loadFromSSM, shouldUseSSM, getSSMParam } from './ssmLoader.js'
+import { loadFromSSM, getSSMParam } from './ssmLoader.js'
 import { logger } from '../lib/logger.js'
 
 /**
@@ -72,6 +72,7 @@ let cachedEnv: Env | null = null
 let flagNames: Set<string> = new Set()
 let flagPaths: Map<string, string> = new Map()
 let awsRegion: string = 'us-east-1'
+let ssmEnabled = false
 
 /**
  * Bootstrap application configuration.
@@ -96,49 +97,36 @@ export async function bootstrap(): Promise<Env> {
 
   dotenvConfig()
 
-  logger.info(
-    {
-      nodeEnv: process.env.NODE_ENV,
-      useSSM: shouldUseSSM(),
-    },
-    'Bootstrapping application configuration'
-  )
+  logger.info('Bootstrapping application configuration', {
+    nodeEnv: process.env.NODE_ENV,
+  })
 
   let config: Record<string, string | undefined> = {}
 
-  // Step 1: Load from SSM (if applicable)
-  if (shouldUseSSM()) {
-    try {
-      const serviceNameValue = process.env.SERVICE_NAME || 'boilerplate'
-      const regionValue = process.env.AWS_REGION || 'us-east-1'
-      
-      awsRegion = regionValue
+  try {
+    const serviceNameValue = 'boilerplate'
+    const regionValue = process.env.AWS_REGION || 'us-east-1'
 
-      const ssmResult = await loadFromSSM({
-        serviceName: serviceNameValue,
-        region: regionValue,
-      })
-      config = { ...ssmResult.config }
-      flagNames = new Set(ssmResult.flagNames)
-      flagPaths = ssmResult.flagPaths
+    awsRegion = regionValue
 
-      logger.info(
-        {
-          parameterCount: Object.keys(ssmResult.config).length,
-          flagCount: flagNames.size,
-        },
-        'Loaded configuration from SSM'
-      )
-    } catch (error) {
-      logger.error(
-        {
-          error: error instanceof Error ? error.message : 'Unknown error',
-        },
-        'Failed to load from SSM, falling back to environment variables'
-      )
-    }
-  } else {
-    logger.info('Skipping SSM (local/test environment)')
+    const ssmResult = await loadFromSSM({
+      serviceName: serviceNameValue,
+      region: regionValue,
+    })
+    config = { ...ssmResult.config }
+    flagNames = new Set(ssmResult.flagNames)
+    flagPaths = ssmResult.flagPaths
+    ssmEnabled = true
+
+    logger.info('Loaded configuration from SSM', {
+      parameterCount: Object.keys(ssmResult.config).length,
+      flagCount: flagNames.size,
+    })
+  } catch (error) {
+    ssmEnabled = false
+    logger.error('Failed to load from SSM, falling back to environment variables', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+    })
   }
 
   // Step 2: Merge with environment variables (env vars override SSM)
@@ -160,14 +148,13 @@ export async function bootstrap(): Promise<Env> {
   // Step 4: Freeze and cache
   cachedEnv = Object.freeze(parsed.data)
 
-  logger.info(
-    {
-      nodeEnv: cachedEnv.NODE_ENV,
-      serviceName: cachedEnv.SERVICE_NAME,
-      port: cachedEnv.PORT,
-    },
-    'Configuration bootstrapped successfully'
-  )
+  logger.info('Configuration bootstrapped successfully', {
+    nodeEnv: cachedEnv.NODE_ENV,
+    serviceName: cachedEnv.SERVICE_NAME,
+    port: cachedEnv.PORT,
+  })
+
+  logger.info('Configuration values', cachedEnv)
 
   return cachedEnv
 }
@@ -178,10 +165,7 @@ export async function bootstrap(): Promise<Env> {
  * For production, use bootstrap() instead.
  */
 export function loadEnv(overrides: Record<string, string> = {}): Env {
-  if (shouldUseSSM()) {
-    throw new Error('Cannot use loadEnv() in non-local environment. Use bootstrap() instead.')
-  }
-
+  ssmEnabled = false
   const raw = { ...process.env, ...overrides }
   const parsed = envSchema.safeParse(raw)
 
@@ -193,6 +177,7 @@ export function loadEnv(overrides: Record<string, string> = {}): Env {
   }
 
   cachedEnv = parsed.data
+  logger.info('Environment loaded synchronously', cachedEnv)
   return cachedEnv
 }
 
@@ -224,7 +209,7 @@ export const config = {
       return cachedEnv[key]
     }
 
-    if (!shouldUseSSM()) {
+    if (!ssmEnabled) {
       return undefined
     }
 

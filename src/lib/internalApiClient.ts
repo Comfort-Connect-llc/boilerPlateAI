@@ -38,7 +38,7 @@ export async function callInternalApi<T = any>(
   const timeoutId = setTimeout(() => controller.abort(), timeout)
 
   try {
-    logger.debug({ url, method, requestId }, 'Calling internal API')
+    logger.debug('Calling internal API', { url, method, requestId })
 
     const response = await fetch(url, {
       method,
@@ -56,16 +56,13 @@ export async function callInternalApi<T = any>(
 
     if (!response.ok) {
       const error = await response.text()
-      logger.error(
-        {
-          url,
-          method,
-          status: response.status,
-          error,
-          requestId,
-        },
-        'Internal API call failed'
-      )
+      logger.error('Internal API call failed', {
+        url,
+        method,
+        status: response.status,
+        error,
+        requestId,
+      })
 
       throw new Error(`API call failed: ${response.status} ${error}`)
     }
@@ -76,7 +73,7 @@ export async function callInternalApi<T = any>(
     clearTimeout(timeoutId)
 
     if (error instanceof Error && error.name === 'AbortError') {
-      logger.error({ url, method, timeout, requestId }, 'Internal API call timed out')
+      logger.error('Internal API call timed out', { url, method, timeout, requestId })
       throw new Error(`API call timed out after ${timeout}ms`)
     }
 

@@ -94,7 +94,7 @@ export async function createItem<T extends BaseEntity>(
   }
 
   await getDynamoDB().send(new PutCommand(params))
-  logger.debug({ tableName, id: newItem.id }, 'Created item in DynamoDB')
+  logger.debug('Created item in DynamoDB', { tableName, id: newItem.id })
 
   return newItem
 }
@@ -177,7 +177,7 @@ export async function updateItem<T extends BaseEntity>(
 
   try {
     const result = await getDynamoDB().send(new UpdateCommand(params))
-    logger.debug({ tableName, id }, 'Updated item in DynamoDB')
+    logger.debug('Updated item in DynamoDB', { tableName, id })
     return result.Attributes as T
   } catch (error) {
     if ((error as Error).name === 'ConditionalCheckFailedException') {

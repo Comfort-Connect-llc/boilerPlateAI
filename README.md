@@ -12,7 +12,7 @@ A production-ready, **domain-agnostic** Node.js TypeScript API boilerplate desig
 - ✅ **Request Context** - AsyncLocalStorage for request-scoped data (no prop drilling)
 - ✅ **Error Handling** - Consistent error responses with proper status codes
 - ✅ **Validation** - Zod schemas with runtime type checking
-- ✅ **Logging** - Structured JSON logging with sensitive data redaction
+- ✅ **Logging** - Winston with structured JSON, CloudWatch transport, and sensitive data redaction; `LOG_LEVEL` (fatal, error, warn, info, debug) controls what is sent to console and CloudWatch
 - ✅ **AWS Services** - S3 (file storage), SNS (events), SSM (config)
 - ✅ **Health Checks** - Liveness and readiness probes
 - ✅ **Security** - Helmet, CORS, input validation, rate limiting ready
@@ -178,7 +178,8 @@ Other services can subscribe to your events without tight coupling.
 ## Documentation
 
 - 📘 **[Creating a New Module](./docs/creating-new-module.md)** - Step-by-step guide
-- 🏗️ **[Architecture](./docs/architecture.md)** - Design decisions and patterns
+- 🏗️ **[Architecture](./docs/architecture.md)** - Design decisions and patterns (includes logging with Winston/CloudWatch)
+- 🔐 **[SSM Setup](./docs/ssm-setup.md)** - SSM Parameter Store paths (`/shared/common/`, `/api/{serviceName}/`, dynamic flags)
 - 📚 **[Example Module](./src/modules/_example-entity/README.md)** - Reference implementation
 
 ## Available Scripts
@@ -308,10 +309,10 @@ Before deploying to production:
 
 - [ ] Configure Auth0 with production tenant
 - [ ] Set up AWS resources (DynamoDB tables, S3 buckets, SNS topics)
-- [ ] Configure environment variables in SSM Parameter Store
+- [ ] Configure environment variables in SSM Parameter Store (paths: `/shared/common/`, `/api/{serviceName}/`, optional `/api/{serviceName}/flags/` for dynamic flags)
 - [ ] Set up PostgreSQL database (RDS recommended)
 - [ ] Run database migrations
-- [ ] Configure logging aggregation (CloudWatch, ELK)
+- [ ] Configure logging: CloudWatch log group `/comfort-connect/{NODE_ENV}/{SERVICE_NAME}`; set `LOG_LEVEL` (e.g. `info`, `debug`) in SSM or env
 - [ ] Set up monitoring and alerts
 - [ ] Configure CORS for your frontend domain
 - [ ] Review and adjust rate limits
