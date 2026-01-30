@@ -64,15 +64,16 @@ const envSchema = z.object({
 
   // Logging
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+
+  SSM_FETCH_TYPE: z.enum(['dynamic', 'static']).default('dynamic'),
 })
 
 export type Env = z.infer<typeof envSchema>
 
 let cachedEnv: Env | null = null
-let flagNames: Set<string> = new Set()
-let flagPaths: Map<string, string> = new Map()
 let awsRegion: string = 'us-east-1'
 let ssmEnabled = false
+let paramPaths = new Map<string, string>()
 
 /**
  * Bootstrap application configuration.
@@ -114,13 +115,14 @@ export async function bootstrap(): Promise<Env> {
       region: regionValue,
     })
     config = { ...ssmResult.config }
-    flagNames = new Set(ssmResult.flagNames)
-    flagPaths = ssmResult.flagPaths
+    paramPaths = ssmResult.paramPaths
     ssmEnabled = true
 
     logger.info('Loaded configuration from SSM', {
       parameterCount: Object.keys(ssmResult.config).length,
-      flagCount: flagNames.size,
+    })
+    logger.info('Loaded param paths', {
+      paramPaths: [...paramPaths.entries()].map(([key, path]) => ({ key, path })),
     })
   } catch (error) {
     ssmEnabled = false
@@ -193,10 +195,11 @@ export function getEnv(): Env {
 }
 
 /**
- * Simple runtime config getter.
+ * Runtime config getter.
  *
- * If the key exists in the bootstrapped cached env, return it.
- * Otherwise, if it's a flag (under /serviceName/flags/), fetch via getSSMParam and return that.
+ * When SSM_FETCH_TYPE is "dynamic" (default): return from cached env if present;
+ * otherwise, if param was loaded from SSM, fetch via getSSMParam using its stored path.
+ * When SSM_FETCH_TYPE is "static": return only from cached env.
  */
 export const config = {
   async get(paramName: string): Promise<Env[keyof Env] | string | undefined> {
@@ -205,25 +208,18 @@ export const config = {
     }
 
     const key = paramName as keyof Env
-    if (Object.prototype.hasOwnProperty.call(cachedEnv, key)) {
-      return cachedEnv[key]
+    if (cachedEnv.SSM_FETCH_TYPE !== 'dynamic') {
+      return Object.prototype.hasOwnProperty.call(cachedEnv, key) ? cachedEnv[key] : undefined
     }
 
     if (!ssmEnabled) {
       return undefined
     }
 
-    if (!flagNames.has(paramName)) {
-      return undefined
-    }
+    const path = paramPaths.get(paramName)
+    if (!path) return undefined
 
-    const flagPath = flagPaths.get(paramName)
-    if (!flagPath) {
-      return undefined
-    }
-
-    const value = await getSSMParam(flagPath, awsRegion)
-    return value
+    return getSSMParam(path, awsRegion)
   },
 }
 

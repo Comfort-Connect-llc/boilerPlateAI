@@ -13,7 +13,7 @@ A production-ready, **domain-agnostic** Node.js TypeScript API boilerplate desig
 - ✅ **Error Handling** - Consistent error responses with proper status codes
 - ✅ **Validation** - Zod schemas with runtime type checking
 - ✅ **Logging** - Winston with structured JSON, CloudWatch transport, and sensitive data redaction; `LOG_LEVEL` (fatal, error, warn, info, debug) controls what is sent to console and CloudWatch
-- ✅ **AWS Services** - S3 (file storage), SNS (events), SSM (config)
+- ✅ **AWS Services** - S3 (file storage), SNS (events), SSM (config). Bootstrap loads from `/shared/common/` and `/api/{serviceName}/`; `config.get()` supports `SSM_FETCH_TYPE` **static** (cached only) or **dynamic** (fetch from SSM via stored paths)
 - ✅ **Health Checks** - Liveness and readiness probes
 - ✅ **Security** - Helmet, CORS, input validation, rate limiting ready
 - ✅ **Testing** - Vitest with mock helpers and examples
@@ -95,8 +95,9 @@ Your API is now running at `http://localhost:3000`!
 │   └── architecture.md             # Design decisions
 ├── src/
 │   ├── config/                     # ✅ Ready to use
-│   │   ├── env.ts                  # Environment validation
-│   │   └── aws.ts                  # AWS/SSM config loading
+│   │   ├── env.ts                  # Bootstrap, getEnv, config.get, SSM_FETCH_TYPE
+│   │   ├── aws.ts                  # AWS client config
+│   │   └── ssmLoader.ts            # loadFromSSM, getSSMParam, paramPaths
 │   ├── db/                         # ✅ Ready to use
 │   │   ├── prisma.ts               # PostgreSQL client
 │   │   └── dynamodb.ts             # DynamoDB utilities
@@ -134,6 +135,17 @@ Your API is now running at `http://localhost:3000`!
 - 📚 = Reference/template
 
 ## Core Concepts
+
+### Config & SSM
+
+At startup, `bootstrap()` loads config from SSM (`/shared/common/`, `/api/{serviceName}/`), merges with `process.env`, validates with Zod, and caches it. SSM param names and their full paths are stored for use by `config.get()`.
+
+- **`getEnv()`** – Synchronous access to the bootstrapped, frozen config.
+- **`config.get(paramName)`** – Async getter. Behavior depends on `SSM_FETCH_TYPE`:
+  - **`static`**: Returns only from cached config; no SSM calls.
+  - **`dynamic`** (default): Fetches from SSM via `getSSMParam` using the path stored at bootstrap (only for params loaded from SSM). Values are always read fresh from SSM.
+
+Use `loadEnv()` in tests to bypass SSM. See [SSM Setup](./docs/ssm-setup.md) for path layout and IAM.
 
 ### Dual Database Strategy
 
@@ -179,7 +191,7 @@ Other services can subscribe to your events without tight coupling.
 
 - 📘 **[Creating a New Module](./docs/creating-new-module.md)** - Step-by-step guide
 - 🏗️ **[Architecture](./docs/architecture.md)** - Design decisions and patterns (includes logging with Winston/CloudWatch)
-- 🔐 **[SSM Setup](./docs/ssm-setup.md)** - SSM Parameter Store paths (`/shared/common/`, `/api/{serviceName}/`, dynamic flags)
+- 🔐 **[SSM Setup](./docs/ssm-setup.md)** - SSM paths (`/shared/common/`, `/api/{serviceName}/`), `SSM_FETCH_TYPE`, `config.get` (static vs dynamic)
 - 📚 **[Example Module](./src/modules/_example-entity/README.md)** - Reference implementation
 
 ## Available Scripts
@@ -309,7 +321,7 @@ Before deploying to production:
 
 - [ ] Configure Auth0 with production tenant
 - [ ] Set up AWS resources (DynamoDB tables, S3 buckets, SNS topics)
-- [ ] Configure environment variables in SSM Parameter Store (paths: `/shared/common/`, `/api/{serviceName}/`, optional `/api/{serviceName}/flags/` for dynamic flags)
+- [ ] Configure environment variables in SSM Parameter Store (paths: `/shared/common/`, `/api/{serviceName}/`). Set `SSM_FETCH_TYPE` to `static` or `dynamic`; dynamic fetches via stored param paths on `config.get()`
 - [ ] Set up PostgreSQL database (RDS recommended)
 - [ ] Run database migrations
 - [ ] Configure logging: CloudWatch log group `/comfort-connect/{NODE_ENV}/{SERVICE_NAME}`; set `LOG_LEVEL` (e.g. `info`, `debug`) in SSM or env
