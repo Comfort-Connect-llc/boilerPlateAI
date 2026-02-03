@@ -8,6 +8,10 @@ import type { PaginatedResponse } from './pagination.js'
 /**
  * Base entity interface that all DynamoDB entities should extend
  * Provides common fields for versioning, soft deletes, and timestamps
+ *
+ * Note: Audit logging is now handled separately by the audit service.
+ * Use `auditService.auditCreate/Update/Delete()` after operations.
+ * See src/lib/audit for the decoupled audit logging system.
  */
 export interface BaseEntity {
   id: string
@@ -15,22 +19,6 @@ export interface BaseEntity {
   active: boolean
   createdAt: string
   updatedAt: string
-}
-
-/**
- * Audit trail entry for tracking entity modifications
- */
-export interface AuditEntry {
-  modifiedBy: string
-  modifiedAt: string
-  changes: Record<string, { before: unknown; after: unknown }>
-}
-
-/**
- * Base entity with audit trail support
- */
-export interface AuditableEntity extends BaseEntity {
-  auditTrail: AuditEntry[]
 }
 
 /**
@@ -98,46 +86,6 @@ export interface CrudService<
    * @throws {ApiError} 404 if not found
    */
   delete(id: string): Promise<void>
-}
-
-/**
- * Build audit trail entry from changes
- *
- * @param userId - User ID making the change (use 'system' for automated changes)
- * @param oldEntity - Previous entity state
- * @param updates - New values being applied
- * @returns Audit entry to append to audit trail
- *
- * @example
- * ```typescript
- * const auditEntry = buildAuditEntry(
- *   user.sub,
- *   existingUser,
- *   { name: 'New Name', email: 'new@example.com' }
- * )
- * ```
- */
-export function buildAuditEntry<T extends BaseEntity>(
-  userId: string,
-  oldEntity: T,
-  updates: Partial<T>
-): AuditEntry {
-  const changes: Record<string, { before: unknown; after: unknown }> = {}
-
-  for (const [key, value] of Object.entries(updates)) {
-    if (value !== undefined && oldEntity[key as keyof T] !== value) {
-      changes[key] = {
-        before: oldEntity[key as keyof T],
-        after: value,
-      }
-    }
-  }
-
-  return {
-    modifiedBy: userId,
-    modifiedAt: new Date().toISOString(),
-    changes,
-  }
 }
 
 /**

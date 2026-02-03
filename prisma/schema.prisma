@@ -11,6 +11,36 @@ datasource db {
 }
 
 // =============================================
+// AUDIT LOG TABLES (Per-Entity)
+// =============================================
+// Audit tables are created per entity type using raw SQL migrations.
+// Each entity has its own audit table: {entity_type}_audit_logs
+//
+// Example: invoice_audit_logs, user_audit_logs, order_audit_logs
+//
+// See src/lib/audit for the decoupled audit logging system.
+// The PostgresWriter uses raw SQL to write to dynamic table names.
+//
+// To create an audit table for a new entity, run:
+//
+// CREATE TABLE invoice_audit_logs (
+//   id UUID PRIMARY KEY,
+//   entity_id VARCHAR(100) NOT NULL,
+//   operation VARCHAR(20) NOT NULL,
+//   user_id VARCHAR(100) NOT NULL,
+//   timestamp TIMESTAMPTZ NOT NULL,
+//   changes JSONB NOT NULL,
+//   snapshot_before JSONB,
+//   snapshot_after JSONB,
+//   metadata JSONB,
+//   created_at TIMESTAMPTZ DEFAULT NOW()
+// );
+// CREATE INDEX idx_invoice_audit_entity ON invoice_audit_logs(entity_id, timestamp DESC);
+// CREATE INDEX idx_invoice_audit_user ON invoice_audit_logs(user_id, timestamp DESC);
+// CREATE INDEX idx_invoice_audit_timestamp ON invoice_audit_logs(timestamp DESC);
+// =============================================
+
+// =============================================
 // ADD YOUR MODELS BELOW
 // =============================================
 //
@@ -19,7 +49,7 @@ datasource db {
 //
 // 1. Use UUID for primary keys
 // 2. Include version, active, createdAt, updatedAt fields
-// 3. Store auditTrail as Json[] for change history
+// 3. Audit history is stored in per-entity audit tables (see above)
 // 4. Use snake_case for database column names with @map
 // 5. Use camelCase for Prisma field names
 //
@@ -35,7 +65,6 @@ datasource db {
 //   active     Boolean  @default(true)
 //   createdAt  DateTime @default(now()) @map("created_at")
 //   updatedAt  DateTime @updatedAt @map("updated_at")
-//   auditTrail Json[]   @default([]) @map("audit_trail")
 //
 //   // Add relations as needed
 //   // relatedItems RelatedItem[]

@@ -7,31 +7,26 @@ import {
   getTableName,
   type BaseEntity,
 } from '../../db/dynamodb.js'
-import { notFound, conflict } from '../../lib/errors.js'
-import { publishEvent, EventTypes } from '../../lib/sns.js'
-import { getUser } from '../../lib/request-context.js'
+import { conflict } from '../../lib/errors.js'
+import { publishEvent, ExampleEventTypes } from '../../lib/sns.js'
+import { getUser, getRequestId } from '../../lib/request-context.js'
 import { logger } from '../../lib/logger.js'
+import { auditService } from '../../lib/audit/index.js'
 import type {
   CreateAccountInput,
   UpdateAccountInput,
   ListAccountsQuery,
 } from './account.schema.js'
 
-// DynamoDB entity type
+// DynamoDB entity type - no longer includes auditTrail (handled separately)
 interface AccountEntity extends BaseEntity {
   name: string
   email: string
   metadata?: Record<string, unknown>
-  auditTrail: AuditEntry[]
-}
-
-interface AuditEntry {
-  modifiedBy: string
-  modifiedAt: string
-  changes: Record<string, { before: unknown; after: unknown }>
 }
 
 const TABLE_NAME = getTableName('accounts')
+const ENTITY_TYPE = 'Account'
 
 // ============================================
 // Service functions
@@ -39,9 +34,11 @@ const TABLE_NAME = getTableName('accounts')
 
 export async function createAccount(input: CreateAccountInput): Promise<AccountEntity> {
   const prisma = getPrisma()
+  const user = getUser()
+  const userId = user?.id ?? 'system'
 
   // Check for duplicate email in PostgreSQL (faster for lookups)
-  const existing = await prisma.account.findUnique({
+  const existing = await (prisma as any).account?.findUnique({
     where: { email: input.email },
   })
 
@@ -56,13 +53,12 @@ export async function createAccount(input: CreateAccountInput): Promise<AccountE
       name: input.name,
       email: input.email,
       metadata: input.metadata,
-      auditTrail: [],
       active: true,
     },
   })
 
   // Sync to PostgreSQL (read replica)
-  await prisma.account.create({
+  await (prisma as any).account?.create({
     data: {
       id: account.id,
       name: account.name,
@@ -75,8 +71,17 @@ export async function createAccount(input: CreateAccountInput): Promise<AccountE
     },
   })
 
+  // Audit the creation (non-blocking, never throws)
+  await auditService.auditCreate({
+    entityType: ENTITY_TYPE,
+    entityId: account.id,
+    entity: account as unknown as Record<string, unknown>,
+    userId,
+    metadata: { requestId: getRequestId(), source: 'api' },
+  })
+
   // Publish event
-  await publishEvent(EventTypes.ACCOUNT_CREATED, {
+  await publishEvent(undefined, ExampleEventTypes.ENTITY_CREATED, {
     accountId: account.id,
     email: account.email,
   })
@@ -122,17 +127,17 @@ export async function listAccounts(
   }
 
   const [accounts, total] = await Promise.all([
-    prisma.account.findMany({
+    (prisma as any).account?.findMany({
       where,
       orderBy: { [orderBy]: orderDirection },
       skip: (page - 1) * pageSize,
       take: pageSize,
-    }),
-    prisma.account.count({ where }),
+    }) ?? [],
+    (prisma as any).account?.count({ where }) ?? 0,
   ])
 
   return {
-    data: accounts.map(a => ({
+    data: accounts.map((a: any) => ({
       id: a.id,
       name: a.name,
       email: a.email,
@@ -141,7 +146,6 @@ export async function listAccounts(
       active: a.active,
       createdAt: a.createdAt.toISOString(),
       updatedAt: a.updatedAt.toISOString(),
-      auditTrail: (a.auditTrail as AuditEntry[]) || [],
     })),
     pagination: {
       page,
@@ -158,16 +162,17 @@ export async function updateAccount(
 ): Promise<AccountEntity> {
   const prisma = getPrisma()
   const user = getUser()
+  const userId = user?.id ?? 'system'
 
-  // Get existing account from DynamoDB
-  const existing = await getItemOrThrow<AccountEntity>({
+  // Get existing account from DynamoDB (this is entityBefore for audit)
+  const entityBefore = await getItemOrThrow<AccountEntity>({
     tableName: TABLE_NAME,
     id,
   })
 
   // Check email uniqueness if changing email
-  if (input.email && input.email !== existing.email) {
-    const duplicate = await prisma.account.findUnique({
+  if (input.email && input.email !== entityBefore.email) {
+    const duplicate = await (prisma as any).account?.findUnique({
       where: { email: input.email },
     })
     if (duplicate) {
@@ -175,63 +180,53 @@ export async function updateAccount(
     }
   }
 
-  // Build changes for audit trail
-  const changes: Record<string, { before: unknown; after: unknown }> = {}
-  for (const [key, value] of Object.entries(input)) {
-    if (value !== undefined && existing[key as keyof AccountEntity] !== value) {
-      changes[key] = {
-        before: existing[key as keyof AccountEntity],
-        after: value,
-      }
-    }
-  }
-
-  // Update in DynamoDB with optimistic locking
-  const auditEntry: AuditEntry = {
-    modifiedBy: user?.sub ?? 'system',
-    modifiedAt: new Date().toISOString(),
-    changes,
-  }
-
-  const updated = await updateItem<AccountEntity>({
+  // Update in DynamoDB with optimistic locking (no audit data in entity)
+  const entityAfter = await updateItem<AccountEntity>({
     tableName: TABLE_NAME,
     id,
-    version: existing.version,
-    updates: {
-      ...input,
-      auditTrail: [...existing.auditTrail, auditEntry],
-    },
+    version: entityBefore.version,
+    updates: input,
   })
 
   // Sync to PostgreSQL
-  await prisma.account.update({
+  await (prisma as any).account?.update({
     where: { id },
     data: {
-      name: updated.name,
-      email: updated.email,
-      metadata: updated.metadata,
-      version: updated.version,
-      updatedAt: new Date(updated.updatedAt),
-      auditTrail: updated.auditTrail,
+      name: entityAfter.name,
+      email: entityAfter.email,
+      metadata: entityAfter.metadata,
+      version: entityAfter.version,
+      updatedAt: new Date(entityAfter.updatedAt),
     },
   })
 
+  // Audit the update (non-blocking, never throws)
+  await auditService.auditUpdate({
+    entityType: ENTITY_TYPE,
+    entityId: id,
+    entityBefore: entityBefore as unknown as Record<string, unknown>,
+    entityAfter: entityAfter as unknown as Record<string, unknown>,
+    userId,
+    metadata: { requestId: getRequestId(), source: 'api' },
+  })
+
   // Publish event
-  await publishEvent(EventTypes.ACCOUNT_UPDATED, {
+  await publishEvent(undefined, ExampleEventTypes.ENTITY_UPDATED, {
     accountId: id,
-    changes,
   })
 
   logger.info('Account updated', { accountId: id })
 
-  return updated
+  return entityAfter
 }
 
 export async function deleteAccount(id: string): Promise<void> {
   const prisma = getPrisma()
+  const user = getUser()
+  const userId = user?.id ?? 'system'
 
-  // Get existing to verify it exists
-  const existing = await getItemOrThrow<AccountEntity>({
+  // Get existing to verify it exists (and for audit snapshot)
+  const entity = await getItemOrThrow<AccountEntity>({
     tableName: TABLE_NAME,
     id,
   })
@@ -240,17 +235,26 @@ export async function deleteAccount(id: string): Promise<void> {
   await softDeleteItem({
     tableName: TABLE_NAME,
     id,
-    version: existing.version,
+    version: entity.version,
   })
 
   // Soft delete in PostgreSQL
-  await prisma.account.update({
+  await (prisma as any).account?.update({
     where: { id },
     data: { active: false },
   })
 
+  // Audit the deletion (non-blocking, never throws)
+  await auditService.auditDelete({
+    entityType: ENTITY_TYPE,
+    entityId: id,
+    entity: entity as unknown as Record<string, unknown>,
+    userId,
+    metadata: { requestId: getRequestId(), source: 'api' },
+  })
+
   // Publish event
-  await publishEvent(EventTypes.ACCOUNT_DELETED, {
+  await publishEvent(undefined, ExampleEventTypes.ENTITY_DELETED, {
     accountId: id,
   })
 
