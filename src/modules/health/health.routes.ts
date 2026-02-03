@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express'
 import httpStatus from 'http-status'
 import { healthCheckPrisma } from '../../db/prisma.js'
 import { healthCheckDynamoDB, getTableName } from '../../db/dynamodb.js'
-import { getEnv } from '../../config/env.js'
+import { getEnv, config } from '../../config/env.js'
 
 const router = Router()
 
@@ -71,7 +71,28 @@ router.get('/', async (_req: Request, res: Response) => {
   res.status(statusCode).json(status)
 })
 
-// Simple liveness probe (doesn't check dependencies)
+// curl "http://localhost:3000/health/config?param=LOG_LEVEL"
+// example usage to test ssm fetch
+router.get('/config', async (req: Request, res: Response) => {
+  const param = req.query.param as string
+  if (!param) {
+    const env = getEnv()
+    return res.status(httpStatus.OK).json({
+      message: 'Use ?param=PARAM_NAME to test config.get. Examples: LOG_LEVEL, NODE_ENV, SERVICE_NAME',
+      SSM_FETCH_TYPE: env.SSM_FETCH_TYPE,
+      example: 'GET /health/config?param=LOG_LEVEL',
+    })
+  }
+  const value = await config.get(param)
+  const env = getEnv()
+  res.status(httpStatus.OK).json({
+    param,
+    value: value ?? null,
+    SSM_FETCH_TYPE: env.SSM_FETCH_TYPE,
+    hint: env.SSM_FETCH_TYPE === 'dynamic' ? 'Fetched from SSM on each request' : 'From cached env only',
+  })
+})
+
 router.get('/live', (_req: Request, res: Response) => {
   res.status(httpStatus.OK).json({ status: 'alive' })
 })
