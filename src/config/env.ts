@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { config as dotenvConfig } from 'dotenv'
 import { loadFromSSM, getSSMParam } from './ssmLoader.js'
 import { logger } from '../lib/logger.js'
+import { DEFAULT_SERVICE_NAME } from './constants.js'
 
 /**
  * Environment variable schema
@@ -30,7 +31,7 @@ const envSchema = z.object({
   // Environment
   NODE_ENV: z.enum(['development', 'production', 'test', 'local']).default('development'),
   PORT: z.coerce.number().default(3000),
-  SERVICE_NAME: z.string().default('boilerplate'),
+  SERVICE_NAME: z.string().default(DEFAULT_SERVICE_NAME),
 
   // Auth0
   AUTH0_DOMAIN: z.string().min(1),
@@ -105,7 +106,7 @@ export async function bootstrap(): Promise<Env> {
   let config: Record<string, string | undefined> = {}
 
   try {
-    const serviceNameValue = 'boilerplate'
+    const serviceNameValue = process.env.SERVICE_NAME || DEFAULT_SERVICE_NAME
     const regionValue = process.env.AWS_REGION || 'us-east-1'
 
     awsRegion = regionValue

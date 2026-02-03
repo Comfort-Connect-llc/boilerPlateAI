@@ -2,6 +2,7 @@ import winston from 'winston'
 import WinstonCloudWatch from 'winston-cloudwatch'
 import type { Request } from 'express'
 import { getEnv } from '../config/env.js'
+import { DEFAULT_SERVICE_NAME } from '../config/constants.js'
 
 interface LogMetadata {
   event?: string
@@ -114,6 +115,18 @@ const RESERVED_META_KEYS = new Set([
   'splat',
 ])
 
+let env: ReturnType<typeof getEnv> | null = null
+try {
+  env = getEnv()
+} catch {
+  // Config not loaded yet, will use defaults
+}
+
+const serviceName = env?.SERVICE_NAME || process.env.SERVICE_NAME || DEFAULT_SERVICE_NAME
+const nodeEnv = env?.NODE_ENV || process.env.NODE_ENV || 'development'
+const logLevel = env?.LOG_LEVEL || process.env.LOG_LEVEL || 'info'
+const awsRegion = env?.AWS_REGION || process.env.AWS_REGION || 'us-east-1'
+
 const normalizeMeta = winston.format((info) => {
   const hasExplicitMetadata =
     info.metadata !== undefined &&
@@ -137,7 +150,7 @@ const structuredFormat = winston.format.combine(
     const structuredLog: Record<string, unknown> = {
       timestamp,
       level,
-      service: meta.service || 'boilerplate',
+      service: meta.service || serviceName,
       event: meta.event || 'General',
       message,
       metadata: meta.metadata || {},
@@ -182,18 +195,6 @@ winston.addColors({
   info: 'green',
   debug: 'blue',
 })
-
-let env: ReturnType<typeof getEnv> | null = null
-try {
-  env = getEnv()
-} catch {
-  // Config not loaded yet, will use defaults
-}
-
-const serviceName = env?.SERVICE_NAME || 'boilerplate'
-const nodeEnv = env?.NODE_ENV || process.env.NODE_ENV || 'development'
-const logLevel = env?.LOG_LEVEL || 'info'
-const awsRegion = env?.AWS_REGION || 'us-east-1'
 
 export const logger = winston.createLogger({
   levels,

@@ -42,6 +42,8 @@ cp .env.example .env
 # Edit .env with your values (Auth0, AWS, Database)
 ```
 
+**Always set the service name for startup:** Edit `src/config/constants.ts` and set `DEFAULT_SERVICE_NAME` to your API name (e.g. `'billing'`, `'users'`). This is used for logging, SSM paths, and CloudWatch when env is not yet initialized.
+
 ### 3. Create Your First Module
 
 See [Creating a New Module](./docs/creating-new-module.md) for detailed instructions.
