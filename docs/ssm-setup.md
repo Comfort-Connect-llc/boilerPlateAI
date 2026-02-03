@@ -26,21 +26,21 @@ This guide shows how to set up AWS Systems Manager (SSM) Parameter Store for sec
 
 ### Production/Staging
 - On startup, `bootstrap()` loads from SSM then merges with environment variables (env overrides SSM)
-- No `.env` file needed; optional dynamic flags under `/api/{serviceName}/flags/` are fetched on-demand via `config.get()`
+- No `.env` file needed. Use `config.get(paramName)` for runtime config; behavior depends on `SSM_FETCH_TYPE` (see below).
 
 ### Parameter Paths
 
 The application loads parameters from these paths in order (later overrides earlier):
 
-1. `/shared/common/` - Shared across all services
+1. `/shared/` - Shared across all services
 2. `/api/{serviceName}/` - Service-specific
 3. Custom paths (if configured)
 
-Parameters under `/api/{serviceName}/flags/` are **dynamic flags**: they are not loaded at bootstrap. Use `config.get(flagName)` at runtime to fetch them on-demand.
+Each parameter's full path is stored at bootstrap. Use `config.get(paramName)` to read values at runtime.
 
 Example for `SERVICE_NAME=boilerplate`:
 ```
-/shared/common/
+/shared/
   ├── AWS_REGION
   ├── LOG_LEVEL
   └── ...
@@ -50,11 +50,14 @@ Example for `SERVICE_NAME=boilerplate`:
   ├── AUTH0_CLIENT_SECRET
   ├── STRIPE_SECRET_KEY
   └── ...
-
-/api/boilerplate/flags/
-  ├── FEATURE_X_ENABLED
-  └── FEATURE_Y_ENABLED
 ```
+
+### config.get and SSM_FETCH_TYPE
+
+- **`SSM_FETCH_TYPE=static`**: `config.get(paramName)` returns only from cached env (bootstrapped config). No SSM calls at runtime.
+- **`SSM_FETCH_TYPE=dynamic`** (default): For params loaded from SSM at bootstrap, `config.get(paramName)` fetches the current value from SSM via `getSSMParam` using the stored path. Values are always read fresh from SSM. Params not in SSM (env-only) return `undefined` in dynamic mode.
+
+Set `SSM_FETCH_TYPE` in `.env` or SSM to switch behavior.
 
 ## Setup Instructions
 
@@ -64,7 +67,7 @@ Example for `SERVICE_NAME=boilerplate`:
 2. Click **Create parameter**
 
 **For shared parameters:**
-- Name: `/shared/common/LOG_LEVEL`
+- Name: `/shared/LOG_LEVEL`
 - Type: `String`
 - Value: `info`
 
@@ -78,17 +81,12 @@ Example for `SERVICE_NAME=boilerplate`:
 - Type: `SecureString`
 - Value: `postgresql://user:password@host:5432/db`
 
-**For dynamic flags (fetched on-demand):**
-- Name: `/api/boilerplate/flags/FEATURE_X_ENABLED`
-- Type: `String`
-- Value: `true` or `false`
-
 ### 2. Using AWS CLI
 
 ```bash
 # Shared parameter (String)
 aws ssm put-parameter \
-  --name "/shared/common/AWS_REGION" \
+  --name "/shared/AWS_REGION" \
   --value "us-east-1" \
   --type "String" \
   --description "AWS region for all services"
@@ -120,15 +118,15 @@ variable "environment" {
   default = "production"
 }
 
-# Shared parameters (path: /shared/common/)
+# Shared parameters (path: /shared/)
 resource "aws_ssm_parameter" "shared_aws_region" {
-  name  = "/shared/common/AWS_REGION"
+  name  = "/shared/AWS_REGION"
   type  = "String"
   value = var.aws_region
 }
 
 resource "aws_ssm_parameter" "shared_log_level" {
-  name  = "/shared/common/LOG_LEVEL"
+  name  = "/shared/LOG_LEVEL"
   type  = "String"
   value = var.environment == "production" ? "info" : "debug"
 }
@@ -218,14 +216,13 @@ Attach this policy to your ECS Task Role:
 
 ## Parameter Naming Convention
 
-Use UPPERCASE with underscores for parameter keys. Paths use `/api/{serviceName}/` and `/shared/common/`:
+Use UPPERCASE with underscores for parameter keys. Paths use `/api/{serviceName}/` and `/shared/`. The key is the last path segment (e.g. `DATABASE_URL` from `/api/boilerplate/DATABASE_URL`):
 
 ```
 ✅ Good:
 /api/boilerplate/DATABASE_URL
 /api/boilerplate/AUTH0_CLIENT_SECRET
-/api/boilerplate/flags/FEATURE_X_ENABLED
-/shared/common/LOG_LEVEL
+/shared/LOG_LEVEL
 
 ❌ Bad:
 /api/boilerplate/database-url
@@ -261,7 +258,7 @@ aws ssm get-parameters-by-path \
 
 # List shared parameters
 aws ssm get-parameters-by-path \
-  --path "/shared/common/" \
+  --path "/shared/" \
   --recursive
 ```
 
@@ -290,6 +287,16 @@ aws ssm get-parameter \
   --with-decryption
 ```
 
+### 4. Test config.get (static vs dynamic)
+
+```bash
+# With server running:
+curl "http://localhost:3000/health/config?param=LOG_LEVEL"
+
+# With SSM_FETCH_TYPE=static: value from cached env
+# With SSM_FETCH_TYPE=dynamic: value fetched from SSM on each request
+```
+
 ## Deployment Workflow
 
 ### Development/Staging/Production
@@ -302,9 +309,8 @@ aws ssm get-parameter \
    ```
 
 2. **Application auto-loads from SSM on bootstrap:**
-   - Fetches from `/shared/common/`
-   - Fetches from `/api/boilerplate/` (and custom paths if configured)
-   - Dynamic flags under `/api/boilerplate/flags/` are fetched on-demand via `config.get()`
+   - Fetches from `/shared/` and `/api/boilerplate/` (and custom paths if configured)
+   - Stores param name → full path for use by `config.get()` when `SSM_FETCH_TYPE=dynamic`
    - Merges with environment variables (env overrides SSM)
    - Starts server
 
@@ -341,7 +347,7 @@ aws ssm get-parameter \
 export LOG_LEVEL=debug
 
 # Check SSM access
-aws ssm get-parameters-by-path --path "/shared/common/"
+aws ssm get-parameters-by-path --path "/shared/"
 ```
 
 ### Parameters not found
@@ -350,7 +356,7 @@ aws ssm get-parameters-by-path --path "/shared/common/"
 
 **Solution:**
 - This is a warning, not an error
-- Paths may not exist (e.g., `/shared/common/` or `/api/boilerplate/` empty)
+- Paths may not exist (e.g., `/shared/` or `/api/boilerplate/` empty)
 - Application falls back to environment variables
 
 ### KMS decryption errors
@@ -394,8 +400,8 @@ Compare to managing `.env` files in S3:
 
 ```bash
 # 1. Create shared parameters (once)
-aws ssm put-parameter --name "/shared/common/AWS_REGION" --value "us-east-1" --type "String"
-aws ssm put-parameter --name "/shared/common/LOG_LEVEL" --value "info" --type "String"
+aws ssm put-parameter --name "/shared/AWS_REGION" --value "us-east-1" --type "String"
+aws ssm put-parameter --name "/shared/LOG_LEVEL" --value "info" --type "String"
 
 # 2. Create service-specific parameters
 SERVICE=boilerplate
@@ -409,14 +415,11 @@ aws ssm put-parameter --name "/api/$SERVICE/DATABASE_URL" --value "postgresql://
 aws ssm put-parameter --name "/api/$SERVICE/DYNAMODB_TABLE_PREFIX" --value "$SERVICE" --type "String"
 aws ssm put-parameter --name "/api/$SERVICE/S3_BUCKET_NAME" --value "$SERVICE-bucket" --type "String"
 
-# 3. (Optional) Dynamic flags - fetched on-demand via config.get('FEATURE_X_ENABLED')
-aws ssm put-parameter --name "/api/$SERVICE/flags/FEATURE_X_ENABLED" --value "true" --type "String"
-
-# 4. Deploy with environment variables
+# 3. Deploy with environment variables
 export NODE_ENV=production
 export SERVICE_NAME=$SERVICE
 
-# 5. Start application - config loads automatically!
+# 4. Start application - config loads automatically!
 npm start
 ```
 
@@ -432,7 +435,7 @@ If you're currently using `.env` files stored in S3:
 2. **Create SSM parameters:**
    ```bash
    # For each line in .env, create an SSM parameter (shared or service path)
-   # Shared: /shared/common/KEY | Service: /api/boilerplate/KEY
+   # Shared: /shared/KEY | Service: /api/boilerplate/KEY
    aws ssm put-parameter --name "/api/boilerplate/KEY" --value "VALUE" --type "SecureString"
    ```
 
