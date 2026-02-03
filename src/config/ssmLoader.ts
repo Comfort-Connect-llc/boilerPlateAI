@@ -18,7 +18,7 @@ export interface SSMLoadResult {
  * Load configuration from AWS SSM Parameter Store.
  *
  * Loading order (last wins):
- * 1. Shared path: /shared/common/
+ * 1. Shared path: /shared/
  * 2. Service-specific path: /api/{serviceName}/
  * 3. Custom paths (in order provided)
  *
@@ -28,7 +28,7 @@ export interface SSMLoadResult {
  *   /api/boilerplate/
  *     - DB_HOST
  *     - STRIPE_SECRET_KEY
- *   /shared/common/
+ *   /shared/
  *     - AWS_REGION
  *     - LOG_LEVEL
  *
@@ -49,7 +49,7 @@ export async function loadFromSSM(
   const client = new SSMClient(awsConfig)
   const config: Record<string, string> = {}
   const paramPaths = new Map<string, string>()
-  const paths = [`/shared/common/`, `/api/${serviceName}/`, ...customPaths]
+  const paths = [`/shared/`, `/api/${serviceName}/`, ...customPaths]
 
   for (const path of paths) {
     try {
@@ -131,13 +131,13 @@ async function loadParametersFromPath(
  * @returns Parameter key
  */
 function extractKeyFromPath(fullPath: string, basePath: string): string {
-  // Remove base path and get the last segment
   const withoutBase = fullPath.replace(basePath, '')
   const segments = withoutBase.split('/').filter(Boolean)
 
-  // For nested paths, join with underscores and uppercase
-  // Example: db/host -> DB_HOST
-  return segments.join('_').toUpperCase()
+  // Previous behavior (kept for reference):
+  // return segments.join('_').toUpperCase()
+
+  return segments.length > 0 ? segments[segments.length - 1] : withoutBase
 }
 
 /**

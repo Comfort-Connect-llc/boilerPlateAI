@@ -57,7 +57,10 @@ async function main() {
       void shutdown('unhandledRejection')
     })
   } catch (error) {
-    fatal('Failed to start server', { metadata: { err: error } })
+    const err = error instanceof Error ? error : new Error(String(error))
+    console.error('Failed to start server:', err.message)
+    if (err.stack) console.error(err.stack)
+    fatal('Failed to start server', { metadata: { message: err.message, stack: err.stack } })
     process.exit(1)
   }
 }

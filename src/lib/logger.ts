@@ -100,7 +100,37 @@ function cleanObject(obj: unknown, depth = 0): unknown {
   return cleaned
 }
 
+const RESERVED_META_KEYS = new Set([
+  'service',
+  'event',
+  'sessionId',
+  'req',
+  'companyId',
+  'profile',
+  'metadata',
+  'level',
+  'message',
+  'timestamp',
+  'splat',
+])
+
+const normalizeMeta = winston.format((info) => {
+  const hasExplicitMetadata =
+    info.metadata !== undefined &&
+    typeof info.metadata === 'object' &&
+    Object.keys(info.metadata as object).length > 0
+  if (!hasExplicitMetadata) {
+    const extra = Object.keys(info).filter((k) => !RESERVED_META_KEYS.has(k))
+    if (extra.length > 0) {
+      info.metadata = Object.fromEntries(extra.map((k) => [k, info[k]]))
+      for (const k of extra) delete info[k]
+    }
+  }
+  return info
+})()
+
 const structuredFormat = winston.format.combine(
+  normalizeMeta,
   winston.format.timestamp(),
   winston.format.json(),
   winston.format.printf(({ timestamp, level, message, ...meta }: Record<string, unknown>) => {
@@ -128,6 +158,7 @@ const structuredFormat = winston.format.combine(
 )
 
 const consoleFormat = winston.format.combine(
+  normalizeMeta,
   winston.format.colorize(),
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.printf(({ timestamp, level, message, ...meta }: Record<string, unknown>) => {
@@ -143,6 +174,14 @@ const levels = {
   info: 3,
   debug: 4,
 }
+
+winston.addColors({
+  fatal: 'red',
+  error: 'red',
+  warn: 'yellow',
+  info: 'green',
+  debug: 'blue',
+})
 
 let env: ReturnType<typeof getEnv> | null = null
 try {
@@ -174,7 +213,18 @@ const cloudwatchConfig: Record<string, unknown> = {
   logStreamName: `${nodeEnv}-${new Date().toISOString().split('T')[0]}`,
   awsRegion,
   messageFormatter: ({ level, message, ...meta }: Record<string, unknown>) => {
-    const cleanMeta = cleanObject(meta) as Record<string, unknown>
+    const hasExplicitMetadata =
+      meta.metadata !== undefined &&
+      typeof meta.metadata === 'object' &&
+      Object.keys(meta.metadata as object).length > 0
+    let metadata: Record<string, unknown> = (meta.metadata as Record<string, unknown>) || {}
+    if (!hasExplicitMetadata) {
+      const extra = Object.keys(meta).filter((k) => !RESERVED_META_KEYS.has(k))
+      if (extra.length > 0) {
+        metadata = Object.fromEntries(extra.map((k) => [k, meta[k]]))
+      }
+    }
+    const cleanMeta = cleanObject({ ...meta, metadata }) as Record<string, unknown>
     return JSON.stringify({
       timestamp: new Date().toISOString(),
       level,
