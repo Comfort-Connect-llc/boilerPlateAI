@@ -60,6 +60,18 @@ cp -r "$TEMPLATE_DIR" "$TARGET_DIR"
 # Remove template README
 rm -f "${TARGET_DIR}/README.md"
 
+# Update constants.ts with the new service name
+CONSTANTS_FILE="src/config/constants.ts"
+if [ -f "$CONSTANTS_FILE" ]; then
+  echo -e "${YELLOW}📝 Updating service name in constants.ts...${NC}"
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "s/DEFAULT_SERVICE_NAME = '.*'/DEFAULT_SERVICE_NAME = '${MODULE_NAME}'/" "$CONSTANTS_FILE"
+  else
+    sed -i "s/DEFAULT_SERVICE_NAME = '.*'/DEFAULT_SERVICE_NAME = '${MODULE_NAME}'/" "$CONSTANTS_FILE"
+  fi
+  echo -e "${GREEN}✓${NC} Set DEFAULT_SERVICE_NAME to '${MODULE_NAME}'"
+fi
+
 # Rename files
 echo -e "${YELLOW}📝 Renaming files...${NC}"
 cd "$TARGET_DIR"
