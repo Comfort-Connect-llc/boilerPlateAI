@@ -37,4 +37,22 @@ if echo "$BRANCH" | grep -qE '^release/'; then
   exit 1
 fi
 
+# Block commits on unrecognized branch types
+if ! echo "$BRANCH" | grep -qE '^(feature|hotfix)/'; then
+  echo ""
+  echo "=========================================="
+  echo "ERROR: Invalid branch type '$BRANCH'"
+  echo "=========================================="
+  echo ""
+  echo "Commits are only allowed on:"
+  echo "  - feature/* branches (for new work)"
+  echo "  - hotfix/*  branches (for urgent fixes)"
+  echo ""
+  echo "Create a proper branch:"
+  echo "  pnpm run git:feature <task-id> <description>"
+  echo "  pnpm run git:hotfix <task-id> <description>"
+  echo ""
+  exit 1
+fi
+
 exit 0
