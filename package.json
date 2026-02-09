@@ -15,7 +15,20 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate deploy",
     "db:generate": "prisma generate",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "prepare": "husky",
+    "git:feature": "bash .husky/scripts/git-feature.sh",
+    "git:sync": "bash .husky/scripts/git-sync.sh",
+    "git:release": "bash .husky/scripts/git-release.sh",
+    "git:sync-feature": "bash .husky/scripts/git-sync-feature.sh",
+    "git:to-staging": "bash .husky/scripts/git-to-staging.sh",
+    "git:ship": "bash .husky/scripts/git-ship.sh",
+    "git:hotfix": "bash .husky/scripts/git-hotfix.sh",
+    "git:status": "bash .husky/scripts/git-status.sh",
+    "git:setup": "bash .husky/scripts/setup-git.sh",
+    "git:setup-rulesets": "bash .husky/scripts/setup-rulesets.sh",
+    "git:merge-staging": "bash .husky/scripts/git-merge-staging.sh",
+    "git:merge-main": "bash .husky/scripts/git-merge-main.sh"
   },
   "keywords": [
     "nodejs",
@@ -52,6 +65,8 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.4.1",
+    "@commitlint/config-conventional": "^20.4.1",
     "@types/compression": "^1.7.5",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
@@ -63,6 +78,7 @@
     "@vitest/coverage-v8": "^2.1.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.7",
     "pino-pretty": "^13.0.0",
     "prettier": "^3.4.0",
     "prisma": "^6.0.0",

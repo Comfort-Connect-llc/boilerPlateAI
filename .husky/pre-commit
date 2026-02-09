@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+# Get the current branch name
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
+
+if [ -z "$BRANCH" ]; then
+  # Detached HEAD state - allow commits (e.g., during rebase)
+  exit 0
+fi
+
+# Block commits on main and staging
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "staging" ]; then
+  echo ""
+  echo "=========================================="
+  echo "ERROR: Direct commits on '$BRANCH' are not allowed!"
+  echo "=========================================="
+  echo ""
+  echo "Use feature branches and the PR workflow:"
+  echo "  pnpm run git:feature <task-id> <description>"
+  echo ""
+  exit 1
+fi
+
+# Block commits on release branches
+if echo "$BRANCH" | grep -qE '^release/'; then
+  echo ""
+  echo "=========================================="
+  echo "ERROR: Direct commits on release branches are not allowed!"
+  echo "=========================================="
+  echo ""
+  echo "Per the Release Branch Isolation Strategy:"
+  echo "  - Commit on your feature branch"
+  echo "  - Then run: pnpm run git:sync-feature"
+  echo ""
+  echo "This ensures all changes go through feature branch review."
+  echo ""
+  exit 1
+fi
+
+exit 0

@@ -1,0 +1,47 @@
+#!/bin/sh
+
+# Get the current branch (target of the merge)
+TARGET_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
+
+if [ -z "$TARGET_BRANCH" ]; then
+  exit 0
+fi
+
+# Only enforce rules when merging TO main or staging
+if [ "$TARGET_BRANCH" != "main" ] && [ "$TARGET_BRANCH" != "staging" ]; then
+  exit 0
+fi
+
+# Get the branch being merged from MERGE_HEAD
+if [ ! -f ".git/MERGE_HEAD" ]; then
+  exit 0
+fi
+
+MERGE_HEAD=$(cat .git/MERGE_HEAD)
+SOURCE_BRANCH=$(git name-rev --name-only "$MERGE_HEAD" 2>/dev/null | sed 's|remotes/origin/||' | sed 's|~[0-9]*||')
+
+# Allow main -> staging (for sync)
+if [ "$SOURCE_BRANCH" = "main" ] && [ "$TARGET_BRANCH" = "staging" ]; then
+  exit 0
+fi
+
+# Only release/* and hotfix/* can merge to main/staging
+case "$SOURCE_BRANCH" in
+  release/*|hotfix/*)
+    exit 0
+    ;;
+  *)
+    echo ""
+    echo "=========================================="
+    echo "ERROR: Only release/* and hotfix/* branches can merge to $TARGET_BRANCH"
+    echo "=========================================="
+    echo ""
+    echo "Source: $SOURCE_BRANCH"
+    echo "Target: $TARGET_BRANCH"
+    echo ""
+    echo "If this is a feature branch, create a release branch first:"
+    echo "  pnpm run git:release"
+    echo ""
+    exit 1
+    ;;
+esac

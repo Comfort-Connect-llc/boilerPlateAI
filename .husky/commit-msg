@@ -1,0 +1,19 @@
+# Enforce commit message format on feature/*, release/*, and hotfix/* branches
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
+
+if echo "$BRANCH" | grep -qE '^(feature|release|hotfix)/'; then
+  if ! npx --no -- commitlint --edit ${1}; then
+    echo ""
+    echo "Commit message format: type(scope): description"
+    echo ""
+    echo "Types: feat, fix, docs, style, refactor, test, chore"
+    echo ""
+    echo "Examples:"
+    echo "  feat(CU-abc123): add user authentication"
+    echo "  fix(CU-abc123): resolve login redirect issue"
+    echo "  docs(CU-abc123): update API documentation"
+    echo "  chore(CU-abc123): update dependencies"
+    echo ""
+    exit 1
+  fi
+fi

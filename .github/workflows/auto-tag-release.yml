@@ -1,0 +1,115 @@
+name: Auto-tag Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  create-tag:
+    if: github.event.pull_request.merged == true && (startsWith(github.event.pull_request.head.ref, 'release/') || startsWith(github.event.pull_request.head.ref, 'hotfix/'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse bump type from PR title
+        id: bump
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          echo "PR title: $PR_TITLE"
+
+          # Extract [major], [minor], or [patch] from the PR title
+          BUMP_TYPE=$(echo "$PR_TITLE" | sed -n 's/^\[\(major\|minor\|patch\)\].*/\1/p')
+
+          if [ -z "$BUMP_TYPE" ]; then
+            echo "::error::PR title must start with [major], [minor], or [patch]. Got: $PR_TITLE"
+            exit 1
+          fi
+
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "Bump type: $BUMP_TYPE"
+
+      - name: Compute next version
+        id: version
+        run: |
+          BUMP_TYPE="${{ steps.bump.outputs.bump_type }}"
+
+          # Find all semver tags, extract their vX.Y.Z part, sort numerically, pick the highest
+          LATEST_SEMVER=$(git tag --list 'v*' | sed -n 's/^v\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/p' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+
+          if [ -z "$LATEST_SEMVER" ]; then
+            LATEST_SEMVER="0.0.0"
+            echo "No existing tags found, starting from v0.0.0"
+          else
+            echo "Latest version found: v${LATEST_SEMVER}"
+          fi
+
+          SEMVER="$LATEST_SEMVER"
+
+          MAJOR=$(echo "$SEMVER" | cut -d. -f1)
+          MINOR=$(echo "$SEMVER" | cut -d. -f2)
+          PATCH=$(echo "$SEMVER" | cut -d. -f3)
+
+          case "$BUMP_TYPE" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+
+          TAG_NAME="v${MAJOR}.${MINOR}.${PATCH}"
+
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "New tag: $TAG_NAME"
+
+      - name: Check if tag exists
+        id: check-tag
+        run: |
+          TAG_NAME="${{ steps.version.outputs.tag_name }}"
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "::warning::Tag $TAG_NAME already exists, skipping"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create and push tag
+        if: steps.check-tag.outputs.exists == 'false'
+        run: |
+          TAG_NAME="${{ steps.version.outputs.tag_name }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$TAG_NAME" -m "Release $TAG_NAME
+
+          PR: #$PR_NUMBER
+          $PR_URL
+
+          $PR_TITLE"
+
+          git push origin "$TAG_NAME"
+          echo "::notice::Created and pushed tag $TAG_NAME"
+
+      - name: Delete release branch
+        if: steps.check-tag.outputs.exists == 'false'
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          git push origin --delete "$BRANCH" || echo "Branch may have already been deleted"
+          echo "::notice::Deleted branch $BRANCH"

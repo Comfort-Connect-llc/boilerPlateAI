@@ -1,0 +1,122 @@
+name: Sync Staging from Main
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync-staging:
+    runs-on: ubuntu-latest
+    # Only run when a release or hotfix was merged (check commit message or merged PR)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Check if sync is needed
+        id: check
+        run: |
+          # Get the commit message of the push
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+
+          # Check if this was a release or hotfix merge
+          if [[ "$COMMIT_MSG" == *"release/"* ]] || [[ "$COMMIT_MSG" == *"hotfix/"* ]] || [[ "$COMMIT_MSG" == *"Merge pull request"* ]]; then
+            echo "should_sync=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_sync=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Sync main to staging
+        if: steps.check.outputs.should_sync == 'true'
+        id: sync
+        run: |
+          # Fetch all branches
+          git fetch origin
+
+          # Check if staging exists
+          if ! git show-ref --verify --quiet refs/remotes/origin/staging; then
+            echo "Staging branch doesn't exist. Creating from main..."
+            git checkout -b staging
+            git push -u origin staging
+            echo "result=created" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Checkout staging
+          git checkout staging
+          git pull origin staging
+
+          # Try to merge main with --no-ff
+          if git merge origin/main --no-ff -m "chore: sync staging with main [auto]"; then
+            git push origin staging
+            echo "result=success" >> $GITHUB_OUTPUT
+          else
+            # Merge conflict - abort and create issue
+            git merge --abort
+            echo "result=conflict" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create issue on conflict
+        if: steps.sync.outputs.result == 'conflict'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🔴 Manual sync required: main → staging conflict',
+              body: `## Automatic Sync Failed
+
+            The automatic sync from \`main\` to \`staging\` encountered merge conflicts.
+
+            ### What happened
+            After merging to \`main\`, the system attempted to sync changes to \`staging\` but found conflicts that require manual resolution.
+
+            ### Required action
+            1. Checkout the \`staging\` branch locally
+            2. Merge \`main\` into \`staging\`: \`git merge origin/main --no-ff\`
+            3. Resolve the conflicts
+            4. Push the resolved \`staging\` branch
+
+            ### Commands
+            \`\`\`bash
+            git checkout staging
+            git pull origin staging
+            git merge origin/main --no-ff
+            # Resolve conflicts...
+            git add .
+            git commit
+            git push origin staging
+            \`\`\`
+
+            ---
+            *This issue was automatically created by the sync-staging workflow.*`,
+              labels: ['sync-conflict', 'urgent']
+            });
+
+            console.log(`Created issue #${issue.number}`);
+
+      - name: Summary
+        run: |
+          RESULT="${{ steps.sync.outputs.result }}"
+          case "$RESULT" in
+            success)
+              echo "✅ Successfully synced main to staging"
+              ;;
+            created)
+              echo "✅ Created staging branch from main"
+              ;;
+            conflict)
+              echo "❌ Merge conflict detected - issue created for manual resolution"
+              ;;
+            *)
+              echo "ℹ️ No sync performed (not a release/hotfix merge)"
+              ;;
+          esac

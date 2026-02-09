@@ -1,0 +1,49 @@
+# Get the current branch name
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
+
+if [ -z "$BRANCH" ]; then
+  echo "Could not determine current branch"
+  exit 1
+fi
+
+# Prevent direct push to main and staging
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "staging" ]; then
+  echo ""
+  echo "=========================================="
+  echo "ERROR: Direct push to '$BRANCH' is not allowed!"
+  echo "=========================================="
+  echo ""
+  echo "Please use the proper workflow:"
+  echo "  - For features: pnpm run git:release"
+  echo "  - For hotfixes: pnpm run git:hotfix <task-id> <name>"
+  echo "  - Then create a PR to merge into $BRANCH"
+  echo ""
+  exit 1
+fi
+
+# Validate branch naming convention
+# Must be: {type}/CU-{task_id}-{description}
+VALID_PATTERN='^(feature|release|hotfix)/CU-[a-z0-9]+-[a-z0-9-]+$'
+
+if ! echo "$BRANCH" | grep -qE "$VALID_PATTERN"; then
+  echo ""
+  echo "=========================================="
+  echo "ERROR: Invalid branch name"
+  echo "=========================================="
+  echo ""
+  echo "Current branch: $BRANCH"
+  echo ""
+  echo "Expected pattern: {type}/CU-{task_id}-description"
+  echo "  - feature/CU-{task_id}-description"
+  echo "  - release/CU-{task_id}-description"
+  echo "  - hotfix/CU-{task_id}-description"
+  echo ""
+  echo "Examples:"
+  echo "  feature/CU-86b62v077-user-authentication"
+  echo "  release/CU-86b62v077-user-authentication"
+  echo "  hotfix/CU-abc123def-critical-fix"
+  echo ""
+  exit 1
+fi
+
+exit 0

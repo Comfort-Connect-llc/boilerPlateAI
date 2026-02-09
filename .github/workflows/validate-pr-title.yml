@@ -1,0 +1,35 @@
+name: Validate PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main]
+
+jobs:
+  validate-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title has semver bump prefix
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          echo "PR title: $PR_TITLE"
+
+          # Check if title starts with [major], [minor], or [patch]
+          if [[ "$PR_TITLE" =~ ^\[(major|minor|patch)\] ]]; then
+            BUMP_TYPE="${BASH_REMATCH[1]}"
+            echo "Valid bump type found: $BUMP_TYPE"
+            exit 0
+          else
+            echo "::error::PR title must start with [major], [minor], or [patch]"
+            echo ""
+            echo "Examples:"
+            echo "  [minor] feat(CU-abc123): add user authentication"
+            echo "  [patch] fix(CU-abc123): resolve payment validation"
+            echo "  [major] feat(CU-abc123): breaking API changes"
+            echo ""
+            echo "The bump type determines version increment:"
+            echo "  [major] = breaking changes (1.0.0 -> 2.0.0)"
+            echo "  [minor] = new features (1.0.0 -> 1.1.0)"
+            echo "  [patch] = bug fixes (1.0.0 -> 1.0.1)"
+            exit 1
+          fi

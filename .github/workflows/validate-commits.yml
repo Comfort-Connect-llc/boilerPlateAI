@@ -1,0 +1,100 @@
+name: Validate Commits
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, staging]
+
+jobs:
+  validate-commits:
+    runs-on: ubuntu-latest
+    # Validate commits on feature/*, release/*, and hotfix/* branches
+    if: startsWith(github.head_ref, 'feature/') || startsWith(github.head_ref, 'release/') || startsWith(github.head_ref, 'hotfix/')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install commitlint
+        run: |
+          npm install -g @commitlint/cli @commitlint/config-conventional
+
+      - name: Create commitlint config
+        run: |
+          cat > commitlint.config.js << 'EOF'
+          module.exports = {
+            extends: ['@commitlint/config-conventional'],
+            rules: {
+              'type-enum': [
+                2,
+                'always',
+                ['feat', 'fix', 'docs', 'style', 'refactor', 'test', 'chore', 'release'],
+              ],
+              'scope-case': [0],
+              'subject-case': [0],
+              'subject-empty': [2, 'never'],
+              'subject-full-stop': [2, 'never', '.'],
+              'header-max-length': [2, 'always', 100],
+            },
+          };
+          EOF
+
+      - name: Validate commit messages
+        run: |
+          # Get the merge base with target branch
+          TARGET="${{ github.base_ref }}"
+          git fetch origin "$TARGET"
+          MERGE_BASE=$(git merge-base HEAD "origin/$TARGET")
+
+          echo "Validating commits from $MERGE_BASE to HEAD"
+          echo "---"
+
+          # Get all commit messages since merge base
+          COMMITS=$(git log --format="%H %s" "$MERGE_BASE..HEAD")
+
+          if [ -z "$COMMITS" ]; then
+            echo "No commits to validate"
+            exit 0
+          fi
+
+          FAILED=0
+          while IFS= read -r line; do
+            SHA=$(echo "$line" | cut -d' ' -f1)
+            MSG=$(echo "$line" | cut -d' ' -f2-)
+
+            # Skip merge commits
+            if [[ "$MSG" == Merge* ]] || [[ "$MSG" == "chore: sync"* ]]; then
+              echo "Skipping merge/sync commit: $MSG"
+              continue
+            fi
+
+            echo "Checking: $MSG"
+            if ! echo "$MSG" | npx commitlint; then
+              echo "::error::Invalid commit message: $MSG"
+              FAILED=1
+            fi
+          done <<< "$COMMITS"
+
+          if [ $FAILED -eq 1 ]; then
+            echo ""
+            echo "::error::One or more commit messages are invalid"
+            echo ""
+            echo "Expected format: type(scope): description"
+            echo ""
+            echo "Types: feat, fix, docs, style, refactor, test, chore"
+            echo ""
+            echo "Examples:"
+            echo "  feat(CU-abc123): add user authentication"
+            echo "  fix(CU-abc123): resolve login redirect issue"
+            echo "  docs(CU-abc123): update API documentation"
+            echo "  chore(CU-abc123): update dependencies"
+            exit 1
+          fi
+
+          echo "All commits validated successfully"

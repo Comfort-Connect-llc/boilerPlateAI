@@ -1,0 +1,103 @@
+name: Branch Enforcement
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches: [main, staging]
+
+jobs:
+  validate-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get PR info
+        id: pr-info
+        run: |
+          echo "source_branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          echo "target_branch=${{ github.base_ref }}" >> $GITHUB_OUTPUT
+
+      - name: Validate PR source branch
+        run: |
+          SOURCE="${{ steps.pr-info.outputs.source_branch }}"
+          TARGET="${{ steps.pr-info.outputs.target_branch }}"
+
+          echo "Source branch: $SOURCE"
+          echo "Target branch: $TARGET"
+
+          # Block feature/* branches from PRing directly to staging or main
+          if [[ "$SOURCE" == feature/* ]]; then
+            echo "::error::Feature branches cannot create PRs directly to $TARGET."
+            echo "::error::Please create a release branch first using: pnpm run git:release"
+            exit 1
+          fi
+
+          # Allow only release/* and hotfix/* to PR to staging and main
+          if [[ "$TARGET" == "staging" || "$TARGET" == "main" ]]; then
+            if [[ "$SOURCE" != release/* && "$SOURCE" != hotfix/* ]]; then
+              echo "::error::Only release/* and hotfix/* branches can create PRs to $TARGET."
+              echo "::error::Source branch '$SOURCE' is not allowed."
+              exit 1
+            fi
+          fi
+
+          echo "PR validation passed: $SOURCE -> $TARGET"
+
+  validate-branch-name:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch naming convention
+        run: |
+          SOURCE="${{ github.head_ref }}"
+          echo "Source branch: $SOURCE"
+
+          # Define the expected pattern: {type}/CU-{task_id}-{description}
+          PATTERN='^(feature|release|hotfix)/CU-[a-z0-9]+-[a-z0-9-]+$'
+
+          if [[ "$SOURCE" =~ $PATTERN ]]; then
+            BRANCH_TYPE="${BASH_REMATCH[1]}"
+            echo "Valid branch name with type: $BRANCH_TYPE"
+            exit 0
+          else
+            echo "::error::Branch name doesn't follow naming convention"
+            echo ""
+            echo "Expected pattern: {type}/CU-{task_id}-description"
+            echo "  - feature/CU-{task_id}-description"
+            echo "  - release/CU-{task_id}-description"
+            echo "  - hotfix/CU-{task_id}-description"
+            echo ""
+            echo "Examples:"
+            echo "  feature/CU-86b62v077-user-authentication"
+            echo "  release/CU-86b62v077-user-authentication"
+            echo "  hotfix/CU-abc123def-critical-fix"
+            echo ""
+            echo "Current branch: $SOURCE"
+            exit 1
+          fi
+
+  check-staleness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if branch is stale
+        run: |
+          SOURCE="${{ github.head_ref }}"
+          TARGET="${{ github.base_ref }}"
+
+          # Get the merge base
+          MERGE_BASE=$(git merge-base origin/$SOURCE origin/$TARGET)
+
+          # Get the latest commit on target
+          TARGET_HEAD=$(git rev-parse origin/$TARGET)
+
+          if [ "$MERGE_BASE" != "$TARGET_HEAD" ]; then
+            echo "::warning::Branch '$SOURCE' is behind '$TARGET'. Consider rebasing or merging $TARGET into your branch."
+
+            # Count commits behind
+            BEHIND=$(git rev-list --count $MERGE_BASE..$TARGET_HEAD)
+            echo "::warning::Your branch is $BEHIND commit(s) behind $TARGET."
+          else
+            echo "Branch is up to date with $TARGET"
+          fi
