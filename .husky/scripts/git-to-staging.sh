@@ -40,6 +40,21 @@ git push -u origin "$CURRENT_BRANCH"
 
 echo ""
 
+# Extract task ID from branch name (e.g., release/CU-abc123-description -> CU-abc123)
+TICKET_ID=$(echo "$CURRENT_BRANCH" | sed -n 's|.*/\(CU-[a-z0-9]*\)-.*|\1|p')
+
+# Extract description from branch name and convert to readable format
+BRANCH_DESC=$(echo "$CURRENT_BRANCH" | sed -n 's|.*/CU-[a-z0-9]*-\(.*\)|\1|p')
+DESCRIPTION=$(echo "$BRANCH_DESC" | tr '-' ' ')
+
+# Build PR title
+if [ -n "$TICKET_ID" ] && [ -n "$DESCRIPTION" ]; then
+  PR_TITLE="chore(${TICKET_ID}): ${DESCRIPTION} to staging"
+else
+  # Fallback if extraction fails
+  PR_TITLE="chore: ${CURRENT_BRANCH} to staging"
+fi
+
 # Check if gh CLI is available
 if command -v gh &> /dev/null; then
   echo -e "${GREEN}Creating PR to staging...${NC}"
@@ -52,7 +67,7 @@ if command -v gh &> /dev/null; then
     PR_URL="$EXISTING_PR"
   else
     # Create new PR
-    if gh pr create --base staging --title "chore: merge ${CURRENT_BRANCH} to staging for UAT" --body "Merge ${CURRENT_BRANCH} to staging for UAT testing." >/dev/null 2>&1; then
+    if gh pr create --base staging --title "$PR_TITLE" --body "Merge ${CURRENT_BRANCH} to staging for UAT testing." >/dev/null 2>&1; then
       PR_URL=$(gh pr view --json url -q '.url' 2>/dev/null)
     else
       echo -e "${RED}Failed to create PR${NC}"
@@ -82,7 +97,7 @@ else
   echo ""
   echo -e "${YELLOW}Create PR to staging:${NC}"
   echo ""
-  echo "  gh pr create --base staging --title \"chore: merge ${CURRENT_BRANCH} to staging for UAT\""
+  echo "  gh pr create --base staging --title \"${PR_TITLE}\""
   echo ""
   echo -e "${YELLOW}Or via GitHub UI:${NC}"
   echo "  https://github.com/malhar212/git-strategy-demo/compare/staging...${CURRENT_BRANCH}"
