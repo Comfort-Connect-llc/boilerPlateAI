@@ -358,6 +358,23 @@ if [ ! -f ".gitignore" ]; then
   touch .gitignore
 fi
 
+# Check if we need to add the section header
+NEEDS_HEADER=0
+for pattern in "${LOCK_PATTERNS[@]}"; do
+  if ! grep -qxF "$pattern" .gitignore 2>/dev/null; then
+    NEEDS_HEADER=1
+    break
+  fi
+done
+
+# Add section header if we're adding new patterns
+if [ $NEEDS_HEADER -eq 1 ]; then
+  if ! grep -qF "# GIT and GITHUB" .gitignore 2>/dev/null; then
+    echo "" >> .gitignore
+    echo "# GIT and GITHUB" >> .gitignore
+  fi
+fi
+
 ADDED_PATTERNS=0
 for pattern in "${LOCK_PATTERNS[@]}"; do
   # Check if pattern already exists in .gitignore

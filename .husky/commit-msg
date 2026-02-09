@@ -1,19 +1,63 @@
-# Enforce commit message format on feature/*, release/*, and hotfix/* branches
-BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
+#!/usr/bin/env bash
 
-if echo "$BRANCH" | grep -qE '^(feature|release|hotfix)/'; then
-  if ! npx --no -- commitlint --edit ${1}; then
+# Enforce commit message format on feature/*, release/*, and hotfix/* branches
+# Auto-prefixes with conventional commit format and task ID from branch name if missing
+
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
+COMMIT_MSG_FILE="$1"
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# Only process on our workflow branches
+if ! echo "$BRANCH" | grep -qE '^(feature|release|hotfix)/'; then
+  exit 0
+fi
+
+# Extract task ID from branch name (e.g., feature/CU-abc123-description -> CU-abc123)
+TASK_ID=$(echo "$BRANCH" | sed -n 's/.*\/\(CU-[a-z0-9]*\).*/\1/p')
+
+# Determine default type based on branch and message content
+if echo "$BRANCH" | grep -qE '^hotfix/'; then
+  DEFAULT_TYPE="fix"
+elif echo "$COMMIT_MSG" | grep -qiE '^Merge'; then
+  DEFAULT_TYPE="chore"
+else
+  DEFAULT_TYPE="feat"
+fi
+
+# Check if message already has conventional commit format
+# Pattern: type(scope): message OR type: message
+if echo "$COMMIT_MSG" | grep -qE '^(feat|fix|docs|style|refactor|test|chore|release)(\([^)]+\))?: .+'; then
+  # Already formatted, just validate with commitlint
+  if ! npx --no -- commitlint --edit "$COMMIT_MSG_FILE" 2>/dev/null; then
     echo ""
-    echo "Commit message format: type(scope): description"
+    echo "Commit message validation failed."
     echo ""
+    echo "Format: type(scope): description"
     echo "Types: feat, fix, docs, style, refactor, test, chore"
-    echo ""
-    echo "Examples:"
-    echo "  feat(CU-abc123): add user authentication"
-    echo "  fix(CU-abc123): resolve login redirect issue"
-    echo "  docs(CU-abc123): update API documentation"
-    echo "  chore(CU-abc123): update dependencies"
     echo ""
     exit 1
   fi
+  exit 0
 fi
+
+# Auto-prefix the commit message
+if [ -n "$TASK_ID" ]; then
+  NEW_MSG="${DEFAULT_TYPE}(${TASK_ID}): ${COMMIT_MSG}"
+else
+  NEW_MSG="${DEFAULT_TYPE}: ${COMMIT_MSG}"
+fi
+
+# Write the new message
+echo "$NEW_MSG" > "$COMMIT_MSG_FILE"
+echo "Auto-formatted commit message: $NEW_MSG"
+
+# Validate the new message
+if ! npx --no -- commitlint --edit "$COMMIT_MSG_FILE" 2>/dev/null; then
+  echo ""
+  echo "Auto-formatted message still failed validation."
+  echo "Please check your commit message."
+  echo ""
+  exit 1
+fi
+
+exit 0
