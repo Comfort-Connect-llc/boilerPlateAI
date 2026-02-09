@@ -37,3 +37,6 @@ prisma/*.db-journal
 
 # AI
 .claude
+.husky/
+.github/
+commitlint.config.js
