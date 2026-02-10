@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   sync-staging:
@@ -22,28 +23,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Disable staging ruleset
-        id: disable-ruleset
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Get staging ruleset ID
-          RULESET_ID=$(gh api "repos/${{ github.repository }}/rulesets" --jq '.[] | select(.name=="staging-protection") | .id' 2>/dev/null || echo "")
-
-          if [ -n "$RULESET_ID" ]; then
-            echo "Disabling staging-protection ruleset (ID: $RULESET_ID)..."
-            gh api "repos/${{ github.repository }}/rulesets/${RULESET_ID}" -X PUT --input - << EOF
-          {
-            "name": "staging-protection",
-            "enforcement": "disabled"
-          }
-          EOF
-            echo "ruleset_id=$RULESET_ID" >> $GITHUB_OUTPUT
-            echo "✓ Ruleset disabled"
-          else
-            echo "No staging-protection ruleset found"
-            echo "ruleset_id=" >> $GITHUB_OUTPUT
-          fi
+      # NOTE: For this workflow to push to staging, you must configure your
+      # staging-protection ruleset to add a bypass for:
+      #   - Actor: "github-actions[bot]" (Deploy key or GitHub App)
+      # OR remove the ruleset's push restrictions for workflows
 
       - name: Sync main to staging
         id: sync
@@ -72,24 +55,6 @@ jobs:
             # Merge conflict - abort and create issue
             git merge --abort
             echo "result=conflict" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Re-enable staging ruleset
-        if: always()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          RULESET_ID="${{ steps.disable-ruleset.outputs.ruleset_id }}"
-
-          if [ -n "$RULESET_ID" ]; then
-            echo "Re-enabling staging-protection ruleset (ID: $RULESET_ID)..."
-            gh api "repos/${{ github.repository }}/rulesets/${RULESET_ID}" -X PUT --input - << EOF
-          {
-            "name": "staging-protection",
-            "enforcement": "active"
-          }
-          EOF
-            echo "✓ Ruleset re-enabled"
           fi
 
       - name: Create issue on conflict
