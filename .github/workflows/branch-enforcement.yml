@@ -52,6 +52,8 @@ jobs:
 
   validate-branch-name:
     runs-on: ubuntu-latest
+    # Skip validation for main branch (used for main→staging sync)
+    if: github.head_ref != 'main'
     steps:
       - name: Check branch naming convention
         run: |
