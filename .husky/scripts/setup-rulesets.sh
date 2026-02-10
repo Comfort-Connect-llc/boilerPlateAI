@@ -64,8 +64,7 @@ echo -e "  ${GREEN}✓${NC} Merge commit will use PR title as commit message"
 echo -e "  ${GREEN}Setting GitHub Actions workflow permissions...${NC}"
 gh api "repos/${REPO}/actions/permissions/workflow" -X PUT --input - << 'EOF' > /dev/null
 {
-  "default_workflow_permissions": "write",
-  "can_approve_pull_request_reviews": true
+  "default_workflow_permissions": "write"
 }
 EOF
 echo -e "  ${GREEN}✓${NC} GitHub Actions has read/write permissions"
