@@ -30,10 +30,19 @@ jobs:
             exit 1
           fi
 
-          # Allow only release/* and hotfix/* to PR to staging and main
-          if [[ "$TARGET" == "staging" || "$TARGET" == "main" ]]; then
+          # Allow only release/* and hotfix/* to PR to main
+          if [[ "$TARGET" == "main" ]]; then
             if [[ "$SOURCE" != release/* && "$SOURCE" != hotfix/* ]]; then
-              echo "::error::Only release/* and hotfix/* branches can create PRs to $TARGET."
+              echo "::error::Only release/* and hotfix/* branches can create PRs to main."
+              echo "::error::Source branch '$SOURCE' is not allowed."
+              exit 1
+            fi
+          fi
+
+          # Allow release/*, hotfix/*, and main to PR to staging
+          if [[ "$TARGET" == "staging" ]]; then
+            if [[ "$SOURCE" != release/* && "$SOURCE" != hotfix/* && "$SOURCE" != "main" ]]; then
+              echo "::error::Only release/*, hotfix/*, and main branches can create PRs to staging."
               echo "::error::Source branch '$SOURCE' is not allowed."
               exit 1
             fi

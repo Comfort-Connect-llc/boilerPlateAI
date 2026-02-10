@@ -103,7 +103,7 @@ if [ "$SKIP_MAIN" = false ]; then
   echo -e "${GREEN}Creating 'main-protection' ruleset...${NC}"
   echo -e "  - Merge method: ${BLUE}squash only${NC}"
   echo -e "  - Required approvals: ${BLUE}0 (no review required)${NC}"
-  echo -e "  - Required checks: ${BLUE}validate-pr, validate-title, validate-commits${NC}"
+  echo -e "  - Required checks: ${BLUE}validate-pr, validate-title, validate-commits, validate-branch-name${NC}"
   echo -e "  - Block force push: ${BLUE}yes${NC}"
   echo -e "  - Block deletion: ${BLUE}yes${NC}"
   echo ""
@@ -138,7 +138,8 @@ if [ "$SKIP_MAIN" = false ]; then
         "required_status_checks": [
           {"context": "validate-pr"},
           {"context": "validate-title"},
-          {"context": "validate-commits"}
+          {"context": "validate-commits"},
+          {"context": "validate-branch-name"}
         ]
       }
     },
