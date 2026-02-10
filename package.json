@@ -28,7 +28,8 @@
     "git:setup": "bash .husky/scripts/setup-git.sh",
     "git:setup-rulesets": "bash .husky/scripts/setup-rulesets.sh",
     "git:merge-staging": "bash .husky/scripts/git-merge-staging.sh",
-    "git:merge-main": "bash .husky/scripts/git-merge-main.sh"
+    "git:merge-main": "bash .husky/scripts/git-merge-main.sh",
+    "git:resolve-staging": "bash .husky/scripts/git-resolve-staging.sh"
   },
   "keywords": [
     "nodejs",
