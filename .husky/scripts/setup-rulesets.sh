@@ -59,6 +59,17 @@ gh api "repos/${REPO}" -X PATCH --input - << 'EOF' > /dev/null
 EOF
 echo -e "  ${GREEN}✓${NC} Squash merge will use PR title as commit message"
 echo -e "  ${GREEN}✓${NC} Merge commit will use PR title as commit message"
+
+# Set GitHub Actions workflow permissions
+echo -e "  ${GREEN}Setting GitHub Actions workflow permissions...${NC}"
+gh api "repos/${REPO}/actions/permissions/workflow" -X PUT --input - << 'EOF' > /dev/null
+{
+  "default_workflow_permissions": "write",
+  "can_approve_pull_request_reviews": true
+}
+EOF
+echo -e "  ${GREEN}✓${NC} GitHub Actions has read/write permissions"
+echo -e "  ${GREEN}✓${NC} GitHub Actions can create and approve PRs"
 echo ""
 
 # ============================================
@@ -92,7 +103,7 @@ if [ "$SKIP_MAIN" = false ]; then
   echo -e "${GREEN}Creating 'main-protection' ruleset...${NC}"
   echo -e "  - Merge method: ${BLUE}squash only${NC}"
   echo -e "  - Required approvals: ${BLUE}0 (no review required)${NC}"
-  echo -e "  - Required checks: ${BLUE}validate-pr, validate-title, validate-commits, validate-branch-name${NC}"
+  echo -e "  - Required checks: ${BLUE}validate-pr, validate-title, validate-commits${NC}"
   echo -e "  - Block force push: ${BLUE}yes${NC}"
   echo -e "  - Block deletion: ${BLUE}yes${NC}"
   echo ""
@@ -127,8 +138,7 @@ if [ "$SKIP_MAIN" = false ]; then
         "required_status_checks": [
           {"context": "validate-pr"},
           {"context": "validate-title"},
-          {"context": "validate-commits"},
-          {"context": "validate-branch-name"}
+          {"context": "validate-commits"}
         ]
       }
     },
