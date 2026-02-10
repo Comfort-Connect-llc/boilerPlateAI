@@ -4,10 +4,12 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   sync-staging:
     runs-on: ubuntu-latest
-    # Only run when a release or hotfix was merged (check commit message or merged PR)
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,21 +22,30 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Check if sync is needed
-        id: check
+      - name: Disable staging ruleset
+        id: disable-ruleset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Get the commit message of the push
-          COMMIT_MSG=$(git log -1 --pretty=%B)
+          # Get staging ruleset ID
+          RULESET_ID=$(gh api "repos/${{ github.repository }}/rulesets" --jq '.[] | select(.name=="staging-protection") | .id' 2>/dev/null || echo "")
 
-          # Check if this was a release or hotfix merge
-          if [[ "$COMMIT_MSG" == *"release/"* ]] || [[ "$COMMIT_MSG" == *"hotfix/"* ]] || [[ "$COMMIT_MSG" == *"Merge pull request"* ]]; then
-            echo "should_sync=true" >> $GITHUB_OUTPUT
+          if [ -n "$RULESET_ID" ]; then
+            echo "Disabling staging-protection ruleset (ID: $RULESET_ID)..."
+            gh api "repos/${{ github.repository }}/rulesets/${RULESET_ID}" -X PUT --input - << EOF
+          {
+            "name": "staging-protection",
+            "enforcement": "disabled"
+          }
+          EOF
+            echo "ruleset_id=$RULESET_ID" >> $GITHUB_OUTPUT
+            echo "✓ Ruleset disabled"
           else
-            echo "should_sync=false" >> $GITHUB_OUTPUT
+            echo "No staging-protection ruleset found"
+            echo "ruleset_id=" >> $GITHUB_OUTPUT
           fi
 
       - name: Sync main to staging
-        if: steps.check.outputs.should_sync == 'true'
         id: sync
         run: |
           # Fetch all branches
@@ -61,6 +72,24 @@ jobs:
             # Merge conflict - abort and create issue
             git merge --abort
             echo "result=conflict" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Re-enable staging ruleset
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RULESET_ID="${{ steps.disable-ruleset.outputs.ruleset_id }}"
+
+          if [ -n "$RULESET_ID" ]; then
+            echo "Re-enabling staging-protection ruleset (ID: $RULESET_ID)..."
+            gh api "repos/${{ github.repository }}/rulesets/${RULESET_ID}" -X PUT --input - << EOF
+          {
+            "name": "staging-protection",
+            "enforcement": "active"
+          }
+          EOF
+            echo "✓ Ruleset re-enabled"
           fi
 
       - name: Create issue on conflict
@@ -115,8 +144,5 @@ jobs:
               ;;
             conflict)
               echo "❌ Merge conflict detected - issue created for manual resolution"
-              ;;
-            *)
-              echo "ℹ️ No sync performed (not a release/hotfix merge)"
               ;;
           esac
