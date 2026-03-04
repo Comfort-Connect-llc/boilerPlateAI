@@ -16,6 +16,7 @@ A production-ready, **domain-agnostic** Node.js TypeScript API boilerplate desig
 - ✅ **AWS Services** - S3 (file storage), SNS (events), SSM (config). Bootstrap loads from `/shared/common/` and `/api/{serviceName}/`; `config.get()` supports `SSM_FETCH_TYPE` **static** (cached only) or **dynamic** (fetch from SSM via stored paths)
 - ✅ **Health Checks** - Liveness and readiness probes
 - ✅ **Security** - Helmet, CORS, input validation, rate limiting ready
+- ✅ **Audit Logging** - Optional, per-domain audit trail with sync/async modes (see [Architecture](./docs/architecture.md#audit-logging))
 - ✅ **Testing** - Vitest with mock helpers and examples
 - ✅ **TypeScript** - Strict mode with full type safety
 
@@ -103,11 +104,12 @@ Your API is now running at `http://localhost:3000`!
 │   ├── db/                         # ✅ Ready to use
 │   │   ├── prisma.ts               # PostgreSQL client
 │   │   └── dynamodb.ts             # DynamoDB utilities
+│   ├── audit/                      # ✅ Audit logging (optional)
 │   ├── lib/                        # ✅ Ready to use
 │   │   ├── base-service.ts         # Service interfaces & helpers
 │   │   ├── pagination.ts           # Pagination utilities
 │   │   ├── query-builder.ts        # Query building helpers
-│   │   ├── logger.ts               # Structured logging
+│   │   ├── logger/                 # Structured logging
 │   │   ├── errors.ts               # Error handling
 │   │   ├── request-context.ts      # Request-scoped context
 │   │   ├── validation.ts           # Validation middleware
@@ -274,23 +276,24 @@ await updateItem({
 })
 ```
 
-### ✅ Audit Trails
+### ✅ Audit Logging (Optional)
 
-Every update is tracked with who/when/what changed:
+Track every create, update, and delete with who/when/what changed. Audit data lives in separate per-domain Postgres tables, keeping your business entities clean:
 
 ```typescript
-{
-  "auditTrail": [
-    {
-      "modifiedBy": "user@example.com",
-      "modifiedAt": "2025-01-06T10:30:00Z",
-      "changes": {
-        "status": { "before": "pending", "after": "completed" }
-      }
-    }
-  ]
-}
+import { getAuditService } from '../../audit/index.js'
+
+getAuditService()?.audit({
+  domain: 'invoices',
+  entityId: invoice.id,
+  operation: 'UPDATE',
+  performedBy: user?.id ?? 'system',
+  snapshotBefore: existing,
+  snapshotAfter: updated,
+})
 ```
+
+Enable with `AUDIT_ENABLED=true`. Supports sync (direct write) and async (SQS → worker) modes. See [Architecture - Audit Logging](./docs/architecture.md#audit-logging) for details.
 
 ### ✅ Permission-Based Authorization
 
