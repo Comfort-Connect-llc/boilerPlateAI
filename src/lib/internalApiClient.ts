@@ -1,6 +1,6 @@
 import { m2mClient } from '../auth/m2mClient.js'
 import { getRequestId } from './request-context.js'
-import { logger } from './logger.js'
+import { logger } from './logger/index.js'
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -35,7 +35,7 @@ export async function callInternalApi<T = any>(
   const requestId = getRequestId()
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeout)
+  const timeoutId = setTimeout(() => { controller.abort(); }, timeout)
 
   try {
     logger.debug('Calling internal API', { url, method, requestId })

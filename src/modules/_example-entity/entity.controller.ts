@@ -1,18 +1,12 @@
-import type { Request, Response, NextFunction } from 'express'
+import type { Request, Response } from 'express'
 import httpStatus from 'http-status'
-import * as accountService from './account.service.js'
+import { asyncHandler } from '../../lib/async-handler.js'
+import * as accountService from './entity.service.js'
 import type {
   CreateAccountInput,
   UpdateAccountInput,
   ListAccountsQuery,
-} from './account.schema.js'
-
-// Wrapper for async route handlers
-const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void>) => {
-  return (req: Request, res: Response, next: NextFunction) => {
-    Promise.resolve(fn(req, res, next)).catch(next)
-  }
-}
+} from './entity.schema.js'
 
 export const createAccount = asyncHandler(async (req: Request, res: Response) => {
   const input: CreateAccountInput = req.body

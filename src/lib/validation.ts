@@ -9,9 +9,7 @@ export interface ValidationSchema {
 }
 
 function formatZodError(error: ZodError): string {
-  return error.issues
-    .map(issue => `${issue.path.join('.')}: ${issue.message}`)
-    .join('; ')
+  return error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')
 }
 
 export function validate(schema: ValidationSchema): RequestHandler {
@@ -56,7 +54,7 @@ export function validate(schema: ValidationSchema): RequestHandler {
 // Common validation schemas
 export const commonSchemas = {
   uuid: z.string().uuid(),
-  
+
   pagination: z.object({
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(10),

@@ -7,19 +7,15 @@ import {
   GetCommand,
   PutCommand,
   UpdateCommand,
-  DeleteCommand,
   QueryCommand,
-  ScanCommand,
   type GetCommandInput,
   type PutCommandInput,
   type UpdateCommandInput,
-  type DeleteCommandInput,
   type QueryCommandInput,
-  type ScanCommandInput,
 } from '@aws-sdk/lib-dynamodb'
 import { getAWSClientConfig } from '../config/aws.js'
 import { getEnv } from '../config/env.js'
-import { logger } from '../lib/logger.js'
+import { logger } from '../lib/logger/index.js'
 import { conflict, notFound } from '../lib/errors.js'
 import { v4 as uuid } from 'uuid'
 

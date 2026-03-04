@@ -3,7 +3,7 @@ import helmet from 'helmet'
 import cors from 'cors'
 import compression from 'compression'
 
-import { logger } from './lib/logger.js'
+import { logger } from './lib/logger/index.js'
 import { requestContextMiddleware } from './lib/request-context.js'
 import { createAuthMiddleware, populateUserContext } from './middleware/auth.js'
 import { metricsMiddleware } from './middleware/metrics.js'
@@ -30,8 +30,9 @@ export function createApp(): Express {
 
   // Request logging
   app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.url?.includes('/health')) {
-      return next()
+    if (req.url.includes('/health')) {
+      next()
+      return
     }
 
     const start = Date.now()

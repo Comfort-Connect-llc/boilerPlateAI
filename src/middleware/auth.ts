@@ -2,6 +2,7 @@ import { auth } from 'express-oauth2-jwt-bearer'
 import type { Request, Response, NextFunction, RequestHandler } from 'express'
 import { getEnv } from '../config/env.js'
 import { setUser, type UserContext } from '../lib/request-context.js'
+import { forbidden } from '../lib/errors.js'
 
 /**
  * Create Auth0 JWT validator middleware.
@@ -45,6 +46,59 @@ export function populateUserContext(req: Request, _res: Response, next: NextFunc
   }
 
   next()
+}
+
+/**
+ * Require user to have one of the specified permissions (OR logic).
+ * Permissions come from Auth0 RBAC — enable "Add Permissions in the Access Token"
+ * in your Auth0 API settings.
+ *
+ * @param permissions - Single permission or array of permissions (user needs at least one)
+ *
+ * @example
+ * router.get('/', requirePermissions('read:invoices'), handler)
+ * router.post('/', requirePermissions(['write:invoices', 'admin:invoices']), handler)
+ */
+export function requirePermissions(permissions: string | string[]) {
+  const required = Array.isArray(permissions) ? permissions : [permissions]
+
+  return (req: Request, _res: Response, next: NextFunction) => {
+    const userPermissions = req.auth?.payload?.permissions ?? []
+
+    const hasPermission = required.some((p) => userPermissions.includes(p))
+
+    if (!hasPermission) {
+      throw forbidden(
+        `Requires one of: ${required.join(', ')}. User has: ${userPermissions.join(', ') || 'none'}`
+      )
+    }
+
+    next()
+  }
+}
+
+/**
+ * Require user to have ALL of the specified permissions (AND logic).
+ *
+ * @param permissions - Array of permissions (user must have all of them)
+ *
+ * @example
+ * router.delete('/', requireAllPermissions(['delete:invoices', 'admin:invoices']), handler)
+ */
+export function requireAllPermissions(permissions: string[]) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    const userPermissions = req.auth?.payload?.permissions ?? []
+
+    const hasAll = permissions.every((p) => userPermissions.includes(p))
+
+    if (!hasAll) {
+      throw forbidden(
+        `Requires all of: ${permissions.join(', ')}. User has: ${userPermissions.join(', ') || 'none'}`
+      )
+    }
+
+    next()
+  }
 }
 
 // Type augmentation for express Request
