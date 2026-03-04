@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction, ErrorRequestHandler } from 'expre
 import httpStatus from 'http-status'
 import { ApiError, isApiError } from '../lib/errors.js'
 import { getLogger, getRequestId } from '../lib/request-context.js'
-import { logger as rootLogger } from '../lib/logger.js'
+import { logger as rootLogger } from '../lib/logger/index.js'
 import { isProduction } from '../config/env.js'
 
 interface ErrorResponse {
@@ -69,24 +69,18 @@ export const errorHandler: ErrorRequestHandler = (
 
   // Log the error
   if (apiError.isOperational) {
-    logger.warn(
-      {
-        err: apiError,
-        statusCode: apiError.statusCode,
-        requestId,
-      },
-      apiError.message
-    )
+    logger.warn(apiError.message, {
+      err: apiError,
+      statusCode: apiError.statusCode,
+      requestId,
+    })
   } else {
-    logger.error(
-      {
-        err,
-        statusCode: apiError.statusCode,
-        requestId,
-        stack: err.stack,
-      },
-      'Unhandled error'
-    )
+    logger.error('Unhandled error', {
+      err,
+      statusCode: apiError.statusCode,
+      requestId,
+      stack: err.stack,
+    })
   }
 
   // Build response

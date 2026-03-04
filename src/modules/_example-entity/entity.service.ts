@@ -7,31 +7,31 @@ import {
   getTableName,
   type BaseEntity,
 } from '../../db/dynamodb.js'
-import { notFound, conflict } from '../../lib/errors.js'
-import { publishEvent, EventTypes } from '../../lib/sns.js'
-import { getUser } from '../../lib/request-context.js'
-import { logger } from '../../lib/logger.js'
-import type {
-  CreateAccountInput,
-  UpdateAccountInput,
-  ListAccountsQuery,
-} from './account.schema.js'
+import { conflict } from '../../lib/errors.js'
+import { publishEvent } from '../../lib/sns.js'
+import { getEnv } from '../../config/env.js'
+import { getUser, getRequestContext } from '../../lib/request-context.js'
+import { logger } from '../../lib/logger/index.js'
+import { getAuditService } from '../../audit/index.js'
+import type { CreateAccountInput, UpdateAccountInput, ListAccountsQuery } from './entity.schema.js'
 
-// DynamoDB entity type
+// DynamoDB entity type (audit fields removed — handled by decoupled audit system)
 interface AccountEntity extends BaseEntity {
   name: string
   email: string
   metadata?: Record<string, unknown>
-  auditTrail: AuditEntry[]
 }
 
-interface AuditEntry {
-  modifiedBy: string
-  modifiedAt: string
-  changes: Record<string, { before: unknown; after: unknown }>
-}
-
+const DOMAIN = 'account'
 const TABLE_NAME = getTableName('accounts')
+
+// Define event types for this module
+// Each service should define their own following the pattern: {domain}.{entity}.{action}
+const AccountEventTypes = {
+  ACCOUNT_CREATED: 'accounts.account.created',
+  ACCOUNT_UPDATED: 'accounts.account.updated',
+  ACCOUNT_DELETED: 'accounts.account.deleted',
+} as const
 
 // ============================================
 // Service functions
@@ -39,6 +39,7 @@ const TABLE_NAME = getTableName('accounts')
 
 export async function createAccount(input: CreateAccountInput): Promise<AccountEntity> {
   const prisma = getPrisma()
+  const user = getUser()
 
   // Check for duplicate email in PostgreSQL (faster for lookups)
   const existing = await prisma.account.findUnique({
@@ -56,7 +57,6 @@ export async function createAccount(input: CreateAccountInput): Promise<AccountE
       name: input.name,
       email: input.email,
       metadata: input.metadata,
-      auditTrail: [],
       active: true,
     },
   })
@@ -75,13 +75,29 @@ export async function createAccount(input: CreateAccountInput): Promise<AccountE
     },
   })
 
+  // Audit after successful create (non-blocking)
+  const auditService = getAuditService()
+  auditService
+    ?.audit({
+      domain: DOMAIN,
+      entityId: account.id,
+      operation: 'CREATE',
+      performedBy: user?.id ?? 'system',
+      snapshotBefore: null,
+      snapshotAfter: account,
+      metadata: getAuditMetadata(),
+    })
+    .catch((err: unknown) => {
+      logger.error('Audit failed', { error: err, entityId: account.id })
+    })
+
   // Publish event
-  await publishEvent(EventTypes.ACCOUNT_CREATED, {
+  await publishEvent(getEnv().SNS_TOPIC_ARN, AccountEventTypes.ACCOUNT_CREATED, {
     accountId: account.id,
     email: account.email,
   })
 
-  logger.info('Account created', { accountId: account.id })
+  logger.info('Account created', { metadata: { accountId: account.id } })
 
   return account
 }
@@ -132,7 +148,7 @@ export async function listAccounts(
   ])
 
   return {
-    data: accounts.map(a => ({
+    data: accounts.map((a: Account) => ({
       id: a.id,
       name: a.name,
       email: a.email,
@@ -141,7 +157,6 @@ export async function listAccounts(
       active: a.active,
       createdAt: a.createdAt.toISOString(),
       updatedAt: a.updatedAt.toISOString(),
-      auditTrail: (a.auditTrail as AuditEntry[]) || [],
     })),
     pagination: {
       page,
@@ -152,14 +167,10 @@ export async function listAccounts(
   }
 }
 
-export async function updateAccount(
-  id: string,
-  input: UpdateAccountInput
-): Promise<AccountEntity> {
+export async function updateAccount(id: string, input: UpdateAccountInput): Promise<AccountEntity> {
   const prisma = getPrisma()
   const user = getUser()
 
-  // Get existing account from DynamoDB
   const existing = await getItemOrThrow<AccountEntity>({
     tableName: TABLE_NAME,
     id,
@@ -175,32 +186,12 @@ export async function updateAccount(
     }
   }
 
-  // Build changes for audit trail
-  const changes: Record<string, { before: unknown; after: unknown }> = {}
-  for (const [key, value] of Object.entries(input)) {
-    if (value !== undefined && existing[key as keyof AccountEntity] !== value) {
-      changes[key] = {
-        before: existing[key as keyof AccountEntity],
-        after: value,
-      }
-    }
-  }
-
   // Update in DynamoDB with optimistic locking
-  const auditEntry: AuditEntry = {
-    modifiedBy: user?.sub ?? 'system',
-    modifiedAt: new Date().toISOString(),
-    changes,
-  }
-
   const updated = await updateItem<AccountEntity>({
     tableName: TABLE_NAME,
     id,
     version: existing.version,
-    updates: {
-      ...input,
-      auditTrail: [...existing.auditTrail, auditEntry],
-    },
+    updates: input,
   })
 
   // Sync to PostgreSQL
@@ -212,25 +203,39 @@ export async function updateAccount(
       metadata: updated.metadata,
       version: updated.version,
       updatedAt: new Date(updated.updatedAt),
-      auditTrail: updated.auditTrail,
     },
   })
 
+  // Audit after successful update (non-blocking)
+  const auditService = getAuditService()
+  auditService
+    ?.audit({
+      domain: DOMAIN,
+      entityId: id,
+      operation: 'UPDATE',
+      performedBy: user?.id ?? 'system',
+      snapshotBefore: existing,
+      snapshotAfter: updated,
+      metadata: getAuditMetadata(),
+    })
+    .catch((err: unknown) => {
+      logger.error('Audit failed', { error: err, entityId: id })
+    })
+
   // Publish event
-  await publishEvent(EventTypes.ACCOUNT_UPDATED, {
+  await publishEvent(getEnv().SNS_TOPIC_ARN, AccountEventTypes.ACCOUNT_UPDATED, {
     accountId: id,
-    changes,
   })
 
-  logger.info('Account updated', { accountId: id })
+  logger.info('Account updated', { metadata: { accountId: id } })
 
   return updated
 }
 
 export async function deleteAccount(id: string): Promise<void> {
   const prisma = getPrisma()
+  const user = getUser()
 
-  // Get existing to verify it exists
   const existing = await getItemOrThrow<AccountEntity>({
     tableName: TABLE_NAME,
     id,
@@ -249,10 +254,36 @@ export async function deleteAccount(id: string): Promise<void> {
     data: { active: false },
   })
 
+  // Audit after successful delete (non-blocking)
+  const auditService = getAuditService()
+  auditService
+    ?.audit({
+      domain: DOMAIN,
+      entityId: id,
+      operation: 'DELETE',
+      performedBy: user?.id ?? 'system',
+      snapshotBefore: existing,
+      snapshotAfter: null,
+      metadata: getAuditMetadata(),
+    })
+    .catch((err: unknown) => {
+      logger.error('Audit failed', { error: err, entityId: id })
+    })
+
   // Publish event
-  await publishEvent(EventTypes.ACCOUNT_DELETED, {
+  await publishEvent(getEnv().SNS_TOPIC_ARN, AccountEventTypes.ACCOUNT_DELETED, {
     accountId: id,
   })
 
-  logger.info('Account deleted', { accountId: id })
+  logger.info('Account deleted', { metadata: { accountId: id } })
+}
+
+// Helper to extract audit metadata from request context
+function getAuditMetadata(): Record<string, unknown> {
+  const ctx = getRequestContext()
+  return {
+    requestId: ctx?.requestId,
+    ip: undefined, // Available from req.ip in controller if needed
+    userAgent: undefined, // Available from req headers in controller if needed
+  }
 }

@@ -14,12 +14,14 @@ This module is intentionally named `_example-entity` to indicate it's a template
 ## What This Module Demonstrates
 
 ### 1. Schema Layer (`entity.schema.ts`)
+
 - Zod schemas for validation
 - Type inference for TypeScript safety
 - Input/output type definitions
 - Query parameter schemas with defaults
 
 ### 2. Service Layer (`entity.service.ts`)
+
 - **Dual Database Pattern**: DynamoDB (primary) + PostgreSQL (read replica)
 - **Optimistic Locking**: Version-based concurrency control
 - **Audit Trail**: Complete change history tracking
@@ -27,12 +29,14 @@ This module is intentionally named `_example-entity` to indicate it's a template
 - **Business Logic**: All domain rules in service layer
 
 ### 3. Controller Layer (`entity.controller.ts`)
+
 - HTTP request/response mapping
 - Async error handling with wrapper
 - Consistent response format
 - HTTP status code management
 
 ### 4. Routes Layer (`entity.routes.ts`)
+
 - Route-level validation
 - Permission-based authorization
 - RESTful endpoint patterns
@@ -94,6 +98,7 @@ model YourDomain {
 ```
 
 Then run:
+
 ```bash
 npx prisma migrate dev --name add_your_domain
 ```
@@ -155,7 +160,7 @@ const updated = await updateItem<YourEntity>({
   tableName: TABLE_NAME,
   id,
   version: existing.version, // Prevents race conditions
-  updates: { ...yourUpdates }
+  updates: { ...yourUpdates },
 })
 ```
 
@@ -165,9 +170,9 @@ Track all changes with who/when/what:
 
 ```typescript
 const auditEntry: AuditEntry = {
-  modifiedBy: user?.sub ?? 'system',
+  modifiedBy: user?.id ?? 'system',
   modifiedAt: new Date().toISOString(),
-  changes: { fieldName: { before: oldValue, after: newValue } }
+  changes: { fieldName: { before: oldValue, after: newValue } },
 }
 ```
 
@@ -176,7 +181,7 @@ const auditEntry: AuditEntry = {
 Publish domain events for async integration:
 
 ```typescript
-await publishEvent(YourEventType.CREATED, {
+await publishEvent(getEnv().SNS_TOPIC_ARN, YourEventTypes.CREATED, {
   entityId: entity.id,
   // ... relevant data
 })
@@ -185,6 +190,7 @@ await publishEvent(YourEventType.CREATED, {
 ### Permission Naming Convention
 
 Use this pattern for permissions:
+
 - `read:your-domain` - List and get operations
 - `write:your-domain` - Create and update operations
 - `delete:your-domain` - Delete operations
@@ -245,6 +251,7 @@ model Child {
 ## Questions?
 
 Refer to:
+
 - `docs/creating-new-module.md` - Step-by-step guide
 - `docs/architecture.md` - Design decisions
 - Main `README.md` - Project overview

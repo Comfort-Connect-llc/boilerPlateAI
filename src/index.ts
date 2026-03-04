@@ -1,8 +1,8 @@
-import { logger, fatal } from './lib/logger.js'
-import { bootstrap } from './config/env.js'
+import { logger, fatal } from './lib/logger/index.js'
+import { bootstrap, getEnv } from './config/env.js'
 import { createApp } from './app.js'
-import { getEnv } from './config/env.js'
 import { disconnectPrisma } from './db/prisma.js'
+import { createAuditService, registerAuditService, AuditWorker, SQSQueue } from './audit/index.js'
 
 async function main() {
   try {
@@ -11,6 +11,16 @@ async function main() {
     await bootstrap()
 
     const env = getEnv()
+
+    // Initialize audit service
+    const auditService = createAuditService()
+    registerAuditService(auditService)
+
+    // Start audit worker (it checks mode internally, only processes in async mode)
+    const auditWorker = new AuditWorker(new SQSQueue())
+    if (env.AUDIT_ENABLED) {
+      auditWorker.start()
+    }
 
     // Create Express app
     const app = createApp()
@@ -23,6 +33,9 @@ async function main() {
     // Graceful shutdown handler
     const shutdown = async (signal: string) => {
       logger.info('Shutdown signal received', { signal })
+
+      // Stop audit worker
+      auditWorker.stop()
 
       // Stop accepting new connections
       server.close(async () => {
@@ -58,8 +71,6 @@ async function main() {
     })
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error))
-    console.error('Failed to start server:', err.message)
-    if (err.stack) console.error(err.stack)
     fatal('Failed to start server', { metadata: { message: err.message, stack: err.stack } })
     process.exit(1)
   }

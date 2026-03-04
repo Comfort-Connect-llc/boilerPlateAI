@@ -1,3 +1,5 @@
+import { getEnv } from './env.js'
+
 export interface AWSClientConfig {
   region: string
   credentials?: {
@@ -13,18 +15,30 @@ export function getAWSClientConfig(): AWSClientConfig {
     return cachedConfig
   }
 
-  const region = process.env.AWS_REGION || 'us-east-1'
-  const accessKeyId = process.env.AWS_ACCESS_KEY_ID
-  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY
+  let env
+  try {
+    env = getEnv()
+  } catch {
+    // Config not loaded yet (e.g., during bootstrap), use process.env as fallback
+    const region = process.env.AWS_REGION || 'us-east-1'
+    const accessKeyId = process.env.AWS_ACCESS_KEY_ID
+    const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY
 
-  cachedConfig = {
-    region,
+    cachedConfig = { region }
+    if (accessKeyId && secretAccessKey) {
+      cachedConfig.credentials = { accessKeyId, secretAccessKey }
+    }
+    return cachedConfig
   }
 
-  if (accessKeyId && secretAccessKey) {
+  cachedConfig = {
+    region: env.AWS_REGION,
+  }
+
+  if (env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY) {
     cachedConfig.credentials = {
-      accessKeyId,
-      secretAccessKey,
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
     }
   }
 

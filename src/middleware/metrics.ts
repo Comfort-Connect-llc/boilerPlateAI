@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express'
 import { getLogger, getRequestId } from '../lib/request-context.js'
-import { logger as rootLogger } from '../lib/logger.js'
+import { logger as rootLogger } from '../lib/logger/index.js'
 
 /**
  * Metrics middleware - tracks request timing and logs completion.

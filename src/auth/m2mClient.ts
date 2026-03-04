@@ -1,4 +1,4 @@
-import { logger } from '../lib/logger.js'
+import { logger } from '../lib/logger/index.js'
 import { getEnv } from '../config/env.js'
 
 interface TokenResponse {

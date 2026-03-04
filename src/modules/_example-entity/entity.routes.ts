@@ -1,13 +1,13 @@
 import { Router } from 'express'
 import { validate } from '../../lib/validation.js'
 import { requirePermissions } from '../../middleware/auth.js'
-import * as accountController from './account.controller.js'
+import * as accountController from './entity.controller.js'
 import {
   createAccountSchema,
   updateAccountSchema,
   listAccountsQuerySchema,
   accountIdParamSchema,
-} from './account.schema.js'
+} from './entity.schema.js'
 
 const router = Router()
 

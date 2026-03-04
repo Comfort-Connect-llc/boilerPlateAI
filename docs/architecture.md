@@ -485,6 +485,79 @@ Include:
 
 ---
 
+## Audit Logging
+
+### Overview
+
+**Location:** `src/audit/`
+
+Audit logging is handled by a dedicated module that lives outside the domain layer. Audit data is stored in separate Postgres tables — one per domain (`{domain}_audit_log`) — keeping business entities clean and audit concerns independent.
+
+### How It Works
+
+```
+Service Layer
+    │
+    ├── Primary write (DynamoDB)
+    ├── Read replica sync (PostgreSQL)
+    └── Audit (non-blocking)
+            │
+            ├── SYNC MODE: Write directly to {domain}_audit_log table
+            └── ASYNC MODE: Publish to SQS → Worker → {domain}_audit_log table
+```
+
+Audit calls are non-blocking. If an audit write fails, the error is logged but the domain operation is never affected.
+
+**Sync** (`AUDIT_MODE=sync`): Writes directly to Postgres after the domain write. Adds ~10-50ms latency.
+
+**Async** (`AUDIT_MODE=async`): Publishes to SQS. A background worker polls the queue and writes to Postgres. ~5ms latency impact, eventual consistency.
+
+### What Gets Recorded
+
+Each audit entry captures:
+- **Operation**: CREATE, UPDATE, or DELETE
+- **Who**: User ID of the performer
+- **Changes**: Deep-diff with dot-notation paths (e.g., `address.city`)
+- **Snapshots**: Before/after entity state — stored inline in Postgres for small payloads, offloaded to S3 for large ones (thresholds configurable)
+- **Metadata**: Request context (requestId, ip, userAgent)
+
+Fields like `updatedAt` and `version` are excluded from change detection by default (configurable via `AUDIT_EXCLUDE_FIELDS`).
+
+### Usage
+
+Services call the audit service after successful writes:
+
+```typescript
+import { getAuditService } from '../../audit/index.js'
+
+const auditService = getAuditService()
+auditService?.audit({
+  domain: DOMAIN,
+  entityId: id,
+  operation: 'UPDATE',
+  performedBy: user?.id ?? 'system',
+  snapshotBefore: existing,
+  snapshotAfter: updated,
+  metadata: { requestId: ctx?.requestId },
+}).catch((err) => {
+  logger.error('Audit failed', { error: err, entityId: id })
+})
+```
+
+### Configuration
+
+Audit logging is **opt-in** — disabled by default.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUDIT_ENABLED` | `false` | Enable/disable audit logging |
+| `AUDIT_MODE` | `sync` | `sync` or `async` |
+| `AUDIT_QUEUE_URL` | — | SQS queue URL (required for async mode) |
+| `AUDIT_EXCLUDE_FIELDS` | `updatedAt,version` | Fields to exclude from change detection |
+| `AUDIT_SNAPSHOT_S3_BUCKET` | — | S3 bucket for large snapshots (optional) |
+
+---
+
 ## Testing Strategy
 
 ### Test Pyramid
