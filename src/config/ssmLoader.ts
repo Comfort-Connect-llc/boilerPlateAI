@@ -1,5 +1,5 @@
 import { SSMClient, GetParametersByPathCommand, GetParameterCommand } from '@aws-sdk/client-ssm'
-import { logger } from '../lib/logger.js'
+import { logger } from '../lib/logger/index.js'
 import { getAWSClientConfig } from './aws.js'
 
 export interface SSMLoaderOptions {

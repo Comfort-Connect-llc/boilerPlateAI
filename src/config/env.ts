@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { config as dotenvConfig } from 'dotenv'
 import { loadFromSSM, getSSMParam } from './ssmLoader.js'
-import { logger } from '../lib/logger.js'
+import { logger } from '../lib/logger/index.js'
 import { DEFAULT_SERVICE_NAME } from './constants.js'
 
 /**
@@ -56,6 +56,9 @@ const envSchema = z.object({
   DYNAMODB_TABLE_PREFIX: z.string().default('boilerplate'),
   DYNAMODB_ENDPOINT: z.string().optional(),
 
+  // SNS
+  SNS_TOPIC_ARN: z.string().optional(),
+
   // S3
   S3_BUCKET_NAME: z.string().min(1),
   S3_PRESIGNED_URL_EXPIRY: z.coerce.number().default(3600),
@@ -67,6 +70,15 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
   SSM_FETCH_TYPE: z.enum(['dynamic', 'static']).default('dynamic'),
+
+  // Audit Logging
+  AUDIT_ENABLED: z.coerce.boolean().default(false),
+  AUDIT_MODE: z.enum(['sync', 'async']).default('sync'),
+  AUDIT_QUEUE_URL: z.string().optional(),
+  AUDIT_EXCLUDE_FIELDS: z.string().optional(),
+  AUDIT_SNAPSHOT_S3_BUCKET: z.string().optional(),
+  AUDIT_SNAPSHOT_INLINE_THRESHOLD: z.coerce.number().default(50 * 1024), // 50KB
+  AUDIT_SNAPSHOT_MAX_SIZE: z.coerce.number().default(256 * 1024), // 256KB
 })
 
 export type Env = z.infer<typeof envSchema>
@@ -157,8 +169,6 @@ export async function bootstrap(): Promise<Env> {
     port: cachedEnv.PORT,
   })
 
-  logger.info('Configuration values', cachedEnv)
-
   return cachedEnv
 }
 
@@ -180,7 +190,11 @@ export function loadEnv(overrides: Record<string, string> = {}): Env {
   }
 
   cachedEnv = parsed.data
-  logger.info('Environment loaded synchronously', cachedEnv)
+  logger.info('Environment loaded synchronously', {
+    nodeEnv: cachedEnv.NODE_ENV,
+    serviceName: cachedEnv.SERVICE_NAME,
+    port: cachedEnv.PORT,
+  })
   return cachedEnv
 }
 

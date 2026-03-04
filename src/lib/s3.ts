@@ -9,7 +9,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { getAWSClientConfig } from '../config/aws.js'
 import { getEnv } from '../config/env.js'
-import { logger } from './logger.js'
+import { logger } from './logger/index.js'
 import { notFound } from './errors.js'
 
 let s3Client: S3Client | null = null
@@ -30,13 +30,14 @@ export interface UploadOptions {
   body: Buffer | Uint8Array | string
   contentType: string
   metadata?: Record<string, string>
+  bucket?: string
 }
 
 export async function uploadFile(options: UploadOptions): Promise<string> {
-  const { key, body, contentType, metadata } = options
+  const { key, body, contentType, metadata, bucket } = options
 
   const command = new PutObjectCommand({
-    Bucket: getBucketName(),
+    Bucket: bucket ?? getBucketName(),
     Key: key,
     Body: body,
     ContentType: contentType,

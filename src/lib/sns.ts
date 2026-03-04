@@ -1,6 +1,6 @@
 import { SNSClient, PublishCommand } from '@aws-sdk/client-sns'
 import { getAWSClientConfig } from '../config/aws.js'
-import { logger } from './logger.js'
+import { logger } from './logger/index.js'
 import { getRequestId } from './request-context.js'
 
 let snsClient: SNSClient | null = null
@@ -39,10 +39,7 @@ export async function publishMessage(options: PublishMessageOptions): Promise<st
 
   const response = await getSNSClient().send(command)
 
-  logger.debug(
-    { topicArn, messageId: response.MessageId },
-    'Published message to SNS'
-  )
+  logger.debug('Published message to SNS', { topicArn, messageId: response.MessageId })
 
   return response.MessageId!
 }

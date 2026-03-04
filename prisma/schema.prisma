@@ -19,9 +19,8 @@ datasource db {
 //
 // 1. Use UUID for primary keys
 // 2. Include version, active, createdAt, updatedAt fields
-// 3. Store auditTrail as Json[] for change history
-// 4. Use snake_case for database column names with @map
-// 5. Use camelCase for Prisma field names
+// 3. Use snake_case for database column names with @map
+// 4. Use camelCase for Prisma field names
 //
 // Example model pattern:
 //
@@ -35,7 +34,6 @@ datasource db {
 //   active     Boolean  @default(true)
 //   createdAt  DateTime @default(now()) @map("created_at")
 //   updatedAt  DateTime @updatedAt @map("updated_at")
-//   auditTrail Json[]   @default([]) @map("audit_trail")
 //
 //   // Add relations as needed
 //   // relatedItems RelatedItem[]
@@ -46,3 +44,32 @@ datasource db {
 //
 // For more examples, see src/modules/_example-entity/README.md
 // =============================================
+
+// =============================================
+// AUDIT LOG
+// =============================================
+//
+// Each domain gets its own audit log table: {domain}_audit_log
+// See docs/architecture.md (Audit Logging) for design details.
+//
+// Example audit log model pattern:
+//
+// model YourEntityAuditLog {
+//   id                  String   @id @default(uuid()) @db.Uuid
+//   domain              String
+//   entityId            String   @map("entity_id")
+//   operation           String   // CREATE, UPDATE, DELETE
+//   performedBy         String   @map("performed_by")
+//   performedAt         DateTime @map("performed_at")
+//   changes             Json     // [{ path, oldValue, newValue }]
+//   snapshotBefore      Json?    @map("snapshot_before")
+//   snapshotBeforeS3Key String?  @map("snapshot_before_s3_key")
+//   snapshotAfter       Json?    @map("snapshot_after")
+//   snapshotAfterS3Key  String?  @map("snapshot_after_s3_key")
+//   metadata            Json?    // { requestId, ip, userAgent }
+//   createdAt           DateTime @default(now()) @map("created_at")
+//
+//   @@index([entityId, performedAt(sort: Desc)])
+//   @@index([performedBy, performedAt(sort: Desc)])
+//   @@map("your_entity_audit_log")
+// }

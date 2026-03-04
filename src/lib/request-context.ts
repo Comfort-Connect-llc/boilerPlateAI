@@ -1,8 +1,8 @@
 import { AsyncLocalStorage } from 'async_hooks'
 import type { Request, Response, NextFunction } from 'express'
 import { v4 as uuid } from 'uuid'
-import type { Logger } from './logger.js'
-import { createRequestLogger } from './logger.js'
+import type { Logger } from './logger/index.js'
+import { createRequestLogger } from './logger/index.js'
 
 export interface UserContext {
   id: string // Auth0 user ID (sub)

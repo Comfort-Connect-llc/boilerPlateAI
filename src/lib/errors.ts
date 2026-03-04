@@ -25,12 +25,17 @@ export class ApiError extends Error {
     Object.setPrototypeOf(this, ApiError.prototype)
   }
 
-  toJSON() {
-    return {
+  toJSON(): { statusCode: number; message: string; details?: unknown } {
+    const result: { statusCode: number; message: string; details?: unknown } = {
       statusCode: this.statusCode,
       message: this.message,
-      ...(this.details && { details: this.details }),
     }
+
+    if (this.details) {
+      result.details = this.details
+    }
+
+    return result
   }
 }
 

@@ -1,6 +1,6 @@
-import { getEnv, getInternalDomains } from '../config/env.js'
+import { getInternalDomains } from '../config/env.js'
 import { getRequestId, getUser } from './request-context.js'
-import { logger } from './logger.js'
+import { logger } from './logger/index.js'
 
 export interface HttpRequestOptions {
   url: string
@@ -42,12 +42,12 @@ export async function httpRequest<T = unknown>(
     const user = getUser()
     if (user) {
       // Internal services might need user context
-      requestHeaders['x-user-id'] = user.sub
+      requestHeaders['x-user-id'] = user.id
     }
   }
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), timeout)
+  const timeoutId = setTimeout(() => { controller.abort(); }, timeout)
 
   try {
     logger.debug('Making HTTP request', { url, method })
