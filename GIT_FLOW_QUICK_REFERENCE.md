@@ -86,6 +86,57 @@ pnpm run git:setup-rulesets        # Configure GitHub protections
 
 ---
 
+## Parallel Workflow (Time View)
+
+The vertical diagram shows **one** feature's path. In practice many features move at
+once — each on its own lane, shipping **independently**. Time flows left → right.
+
+`main` is the trunk on top. Branches start from `main` and **merge back up to it** (the
+`*` ships). A release ALSO goes **down to `staging`** first for UAT (the `▼`). Note the
+two arrows are separate: `staging` only ever *receives* — it never merges into `main`.
+
+```
+              branch       ship A      ship hf    ship B
+              A & B         v1.2.0      v1.2.1     v1.3.0
+                            │           │          │
+ main     ────┬────┬────────*───────────*──────────*────────▶
+              │    │        ↑           ↑          ↑
+ feature/A    ├─●──┼──●─rel/A┘          │          │
+              │    │                    │          │
+ hotfix       │    └─●──●───────────────┘          │
+              │    │                               │
+ feature/B    └─●──┼────●─rel/B ───────────────────┘
+                   │
+                   ▼
+ staging  ═════════[A]═══════[A]═════════[A]══════[A+B]═════▶
+                   │         ↑           ↑
+                   ▼         └───────────┴─ auto-sync main→staging after each ship
+              (release PRs here for UAT before shipping)
+
+ Legend   ●  commit / merge point      *  squash-merge to main (ships + 🏷 auto-tag)
+          ▼  PR down to staging for UAT       ↑ auto-sync main→staging after a ship
+          Path: feature → release/* → ▼ staging (UAT) → * main (squash) → 🏷 tag + sync
+```
+
+**Read it lane by lane:**
+
+| Lane | What happens |
+|------|--------------|
+| **`feat/A`, `feat/B`** | Develop in parallel with free-form commits. Each becomes its own `release/*`, which PRs to **staging** (merge commit, for UAT) then to **main** (squash). They never block each other. |
+| **`hotfix`** | Branches from `main`, squashed straight back to `main` (staging optional). Jumps the queue — never waits on in-flight features. |
+| **`staging`** | The shared UAT branch. Each `main` merge auto-syncs down, so after A ships, staging carries A as a baseline; B is then UAT'd **on top of shipped A** (and the hotfix). |
+| **`main`** | Production. Receives only squash merges; each one auto-tags a version, deletes the source branch, and triggers the staging sync. |
+
+**Key idea:** A ships Tuesday, the hotfix Wednesday, B Friday — three independent
+releases, no cross-blocking, and `main` gets one clean commit + version tag per ship.
+
+> ⚠️ **Caveat:** features sit in `staging` together and are UAT'd as a *blend*, but each
+> ships to `main` *alone* (squashed). If two features touch the same area, validate the
+> shipping one against current `main` before release. (Planned per-feature test
+> environments will tighten this.)
+
+---
+
 ## Complete Workflow
 
 ### Feature → Production (Step-by-Step)
